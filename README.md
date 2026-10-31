@@ -71,9 +71,17 @@ data/
         └── instances_val2017.json
 ```
 
-The preprocessing scripts use this layout. They deterministically select 300
-images (seed 42) with 1–8 non-crowd instances, write the chosen COCO image IDs,
-and export binary ground-truth masks. Read the source dataset's license and
+From `backend/`, inspect the raw annotation format and prepare the subset:
+
+```sh
+uv run python scripts/inspect_coco.py
+uv run python scripts/prepare_coco_subset.py
+uv run python scripts/export_gt_masks.py
+```
+
+The preprocessing scripts deterministically select 300 images (seed 42) with
+1–8 non-crowd instances, write the chosen COCO image IDs, and export binary
+ground-truth masks. Read the source dataset's license and
 individual image terms before sharing any data or demo output; the dataset is not
 included in this repository.
 
