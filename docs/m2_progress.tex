@@ -1,0 +1,186 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage[round]{natbib}
+\usepackage{hyperref}
+\hypersetup{colorlinks=true, linkcolor=blue!50!black, citecolor=blue!50!black, urlcolor=blue!50!black}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{caption}
+
+\title{\LARGE Progress Report\\[4pt]
+\large Prompt-Driven Interactive Segmentation as a Dataset-Annotation Tool}
+\author{
+  \begin{tabular}{c}
+    Student A: 2301498\\
+    Abdelhafeez Aref Abdelhafeez Almaz
+  \end{tabular}
+  \and
+  \begin{tabular}{c}
+    Student B: 2501925\\
+    Abdelrahman Eid Ashour Mohamed
+  \end{tabular}
+}
+\date{Milestone 2 --- \today\\CSE 681 --- Digital Image Processing}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This project investigates whether point- and box-prompted SAM 2.1 can reduce the
+effort required to produce instance masks while retaining agreement with COCO
+ground truth. The local dataset workflow now contains 300 deterministically
+selected COCO 2017 validation images, 979 non-crowd instances across 80
+categories, and exported instance masks. The React/TypeScript interface and
+FastAPI backend now support browsing those images, selecting a target instance,
+and saving a prediction with its annotation time and computed IoU/Dice. The
+software checks pass, but SAM 2 inference has not yet been run end-to-end and
+neither method has a measured annotation-quality or timing result; no
+performance conclusion is claimed in this report.
+\end{abstract}
+
+\section{Recap}
+\label{sec:recap}
+Manual instance-mask annotation is labor-intensive. We compare a manual polygon
+baseline with a human-in-the-loop workflow in which an annotator prompts a
+frozen SAM 2.1 Hiera-Tiny model and accepts or refines its mask. Both methods
+are intended to annotate the same COCO object instances. The data source is
+COCO 2017 val2017 \citep{lin2014coco}; the reproducible subset contains 300
+images selected with seed 42 from images with 1--8 non-crowd instances. The
+selected annotations yield 979 non-crowd instance masks in 80 categories. The
+reference mask is intended for scoring only, not for choosing prompts.
+
+\section{Implementation Status}
+\label{sec:status}
+The current application uses a React, TypeScript, and Vite frontend with a
+Python FastAPI backend. The backend exposes local COCO image listing and image
+serving, accepts prompted image-segmentation requests, and provides an
+annotation-saving endpoint that checks image/annotation pairing, computes
+binary-mask IoU and Dice, and records the mask, prompts, and elapsed time in a
+local evaluation manifest. The frontend includes COCO image and target-instance
+selectors, positive/negative point and box prompts, mask review, and acceptance
+with metric display. Downloaded images, masks, checkpoint, and evaluation
+outputs are excluded from Git; reproduction instructions are tracked.
+The images retain their individual terms of use \citep{cocoTerms}.
+
+The COCO data/API tests pass (16 backend tests in total), and the frontend
+TypeScript build and lint checks pass. These are software-validation results,
+not segmentation experiments. The optional SAM 2 Python dependency has not
+been installed in the current environment, so the downloaded checkpoint and
+inference route have not yet been validated together. The original plan's
+manual polygon baseline also remains to be run. No model training is planned:
+the contribution is an interactive annotation and evaluation workflow around a
+frozen SAM 2 model \citep{ravi2024sam2}.
+
+\subsection{Baseline Reproduction}
+The manual polygon baseline has not yet been reproduced or measured. No
+annotation times, IoU, or Dice values are available for it. It remains a
+required M3 experiment: annotate the same target objects with a standard
+polygon tool, using the same timer start/stop definition, then compare masks
+with the corresponding COCO references.
+
+\subsection{Your Method}
+The web workflow is implemented through the software path: browse a local COCO
+sample, choose one of its non-crowd objects, add points and/or a box, request a
+mask, and accept it. Acceptance saves the prediction and elapsed time and
+computes metrics against the matching exported COCO mask. Inference latency is
+reported separately from annotation time. The remaining end-to-end gap is
+execution with the actual SAM 2.1 checkpoint and collection of evaluated
+annotations; until then the user interface and API are not evidence of model
+quality or time savings.
+
+\section{Preliminary Results}
+\label{sec:results}
+The current quantitative evidence describes dataset preparation and software
+validation only. No human-created baseline masks or SAM 2 predictions have
+been evaluated, so method-level IoU, Dice, and annotation-time comparisons are
+not yet available.
+
+\begin{table}[ht]
+\centering
+\caption{Evidence available at the time of this progress report. ``Not
+measured'' denotes missing experimental data, not a zero score.}
+\label{tab:prelim}
+\begin{tabular}{@{}lccc@{}}
+\toprule
+\textbf{Workflow} & \textbf{Instances} & \textbf{Mean IoU / Dice} & \textbf{Annotation time} \\
+\midrule
+Manual polygon baseline & 0 evaluated & Not measured & Not measured \\
+SAM 2.1 prompted tool & 0 evaluated & Not measured & Not measured \\
+\midrule
+Prepared COCO subset & 979 masks & -- & -- \\
+Automated backend tests & 16 passed & -- & -- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+No qualitative SAM 2 examples are included because a real inference run has
+not yet been completed. The next report should include representative
+successful cases and failure cases captured from actual annotations, without
+exposing the reference mask while prompts are selected.
+
+\section{Challenges \& Deviations from the M1 Plan}
+\label{sec:challenges}
+The local subset and mask export are ready, but the optional model package has
+not been installed and real inference has not been exercised. Consequently,
+the planned manual-versus-prompted comparison is behind the software
+implementation. The M2 work prioritized a reproducible data/API path and
+persisted metrics rather than claiming results from synthetic test fixtures.
+COCO source images and derived masks remain local and ignored by Git; the
+tracked data guide describes how to reproduce them. The work therefore
+deviates from a results-oriented milestone report: the implementation path is
+in place, while experimental validation remains incomplete.
+
+\section{Updated Work Breakdown \& MVP Status}
+\label{sec:workbreakdown}
+The software portion of the MVP is implemented, but the M1 minimum viable
+experimental deliverable has not been reached: the fixed-sample manual and
+prompted masks, paired timing data, and comparative metrics are still missing.
+The team must complete these measurements before drawing conclusions in M3.
+Because the team has two members, Student B combines the planned model/tool
+and evaluation/integration responsibilities.
+
+\begin{table}[ht]
+\centering
+\caption{Updated two-member milestone allocation and status.}
+\label{tab:tasks}
+\begin{tabular}{@{}p{0.20\linewidth}p{0.35\linewidth}p{0.35\linewidth}@{}}
+\toprule
+\textbf{Milestone} & \textbf{Student A} & \textbf{Student B} \\
+\midrule
+M2 (current) &
+COCO subset and manual-baseline protocol prepared; polygon measurements remain pending. &
+React/FastAPI annotation and evaluation workflow implemented; real SAM 2 inference and evaluated samples remain pending. \\
+M3 (planned) &
+Complete the manual polygon baseline on the fixed sample and record time consistently. &
+Install and validate SAM 2.1, complete prompted annotations, audit metrics, and produce the comparison and qualitative examples. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Next Steps}
+\label{sec:next}
+\begin{enumerate}[leftmargin=*]
+  \item Install the optional SAM 2 dependency, configure the downloaded
+  Hiera-Tiny checkpoint, and verify an end-to-end point- and box-prompt run on
+  local COCO images.
+  \item Select and record the fixed evaluation sample and target annotation IDs
+  before either method is run; do not reveal ground truth during prompt choice.
+  \item Collect paired manual polygon and prompted masks and times using the
+  same timer definition. Record device, model/checkpoint identity, prompts,
+  failures, and any excluded cases.
+  \item Run the evaluator, verify per-instance mask dimensions and IDs, and
+  report mean/median annotation time, mean IoU and Dice, and representative
+  successes and failures. Avoid time-savings claims until these measurements
+  are complete.
+\end{enumerate}
+
+\bibliographystyle{unsrtnat}
+\bibliography{references}
+
+\end{document}
