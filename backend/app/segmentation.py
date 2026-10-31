@@ -3,6 +3,7 @@ import io
 import os
 from functools import lru_cache
 from pathlib import Path
+from threading import Lock
 from typing import Any
 
 import numpy as np
@@ -13,6 +14,8 @@ from app.prompts import PromptPayload
 
 DEFAULT_CONFIG = "configs/sam2.1/sam2.1_hiera_t.yaml"
 MAX_IMAGE_BYTES = 15 * 1024 * 1024
+MAX_IMAGE_PIXELS = 25_000_000
+_prediction_lock = Lock()
 
 
 def model_status() -> dict[str, Any]:
@@ -78,6 +81,11 @@ def segment_image(
         raise HTTPException(status_code=400, detail="Uploaded image is empty")
     try:
         with Image.open(io.BytesIO(image_bytes)) as source:
+            if source.width * source.height > MAX_IMAGE_PIXELS:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"Image exceeds the {MAX_IMAGE_PIXELS:,}-pixel limit",
+                )
             image = source.convert("RGB")
     except (UnidentifiedImageError, OSError) as exc:
         raise HTTPException(status_code=400, detail="Uploaded file is not a valid image") from exc
@@ -99,7 +107,6 @@ def segment_image(
                 detail=f"Box coordinates must be within the {width}x{height} image",
             )
 
-    predictor = get_predictor()
     point_coords = (
         np.asarray([[point.x, point.y] for point in prompt.points], dtype=np.float32)
         if prompt.points
@@ -112,16 +119,18 @@ def segment_image(
     )
     box = np.asarray(prompt.box, dtype=np.float32) if prompt.box is not None else None
 
-    import torch
+    with _prediction_lock:
+        predictor = get_predictor()
+        import torch
 
-    with torch.inference_mode():
-        predictor.set_image(np.asarray(image))
-        masks, scores, _ = predictor.predict(
-            point_coords=point_coords,
-            point_labels=point_labels,
-            box=box,
-            multimask_output=True,
-        )
+        with torch.inference_mode():
+            predictor.set_image(np.asarray(image))
+            masks, scores, _ = predictor.predict(
+                point_coords=point_coords,
+                point_labels=point_labels,
+                box=box,
+                multimask_output=True,
+            )
 
     best_index = int(np.argmax(scores))
     mask = np.asarray(masks[best_index], dtype=np.uint8) * 255

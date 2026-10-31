@@ -1,5 +1,6 @@
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from pydantic import ValidationError
+from starlette.concurrency import run_in_threadpool
 
 from app.prompts import PromptPayload
 from app.segmentation import MAX_IMAGE_BYTES, model_status, segment_image
@@ -27,4 +28,4 @@ async def segment(
     if len(image_bytes) > MAX_IMAGE_BYTES:
         raise HTTPException(status_code=413, detail="Image exceeds the 15 MiB upload limit")
 
-    return segment_image(image_bytes, parsed_prompt)
+    return await run_in_threadpool(segment_image, image_bytes, parsed_prompt)
