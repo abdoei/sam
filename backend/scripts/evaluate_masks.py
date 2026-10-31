@@ -27,13 +27,15 @@ def read_ground_truth_index(index_path: Path) -> dict[int, dict[str, Any]]:
         required = {"ann_id", "image_id", "category_id", "mask_path"}
         missing = required - set(reader.fieldnames or [])
         if missing:
-            raise ValueError(f"Ground-truth index is missing columns: {', '.join(sorted(missing))}")
+            raise ValueError(
+                f"Ground-truth index is missing columns: {', '.join(sorted(missing))}")
 
         ground_truth: dict[int, dict[str, Any]] = {}
         for row in reader:
             ann_id = int(row["ann_id"])
             if ann_id in ground_truth:
-                raise ValueError(f"Duplicate annotation ID in ground-truth index: {ann_id}")
+                raise ValueError(
+                    f"Duplicate annotation ID in ground-truth index: {ann_id}")
             ground_truth[ann_id] = {
                 "image_id": int(row["image_id"]),
                 "category_id": int(row["category_id"]),
@@ -53,7 +55,8 @@ def evaluate_manifest(
         missing = required - set(reader.fieldnames or [])
         if missing:
             missing_columns = ", ".join(sorted(missing))
-            raise ValueError(f"Prediction manifest is missing columns: {missing_columns}")
+            raise ValueError(
+                f"Prediction manifest is missing columns: {missing_columns}")
 
         result_rows: list[dict[str, Any]] = []
         seen_ids: set[int] = set()
@@ -62,9 +65,11 @@ def evaluate_manifest(
             if ann_id < 1:
                 raise ValueError(f"Annotation ID must be positive: {ann_id}")
             if ann_id in seen_ids:
-                raise ValueError(f"Duplicate annotation ID in prediction manifest: {ann_id}")
+                raise ValueError(
+                    f"Duplicate annotation ID in prediction manifest: {ann_id}")
             if ann_id not in ground_truth:
-                raise ValueError(f"Annotation ID {ann_id} is absent from the ground-truth index")
+                raise ValueError(
+                    f"Annotation ID {ann_id} is absent from the ground-truth index")
             seen_ids.add(ann_id)
 
             prediction_path = Path(row["prediction_path"])
@@ -80,7 +85,8 @@ def evaluate_manifest(
             if elapsed_seconds is not None and (
                 not math.isfinite(elapsed_seconds) or elapsed_seconds < 0
             ):
-                raise ValueError(f"Annotation time must be finite and non-negative for ID {ann_id}")
+                raise ValueError(
+                    f"Annotation time must be finite and non-negative for ID {ann_id}")
             result_rows.append(
                 {
                     "ann_id": ann_id,
@@ -148,7 +154,8 @@ def main() -> None:
         writer.writerows(result_rows)
 
     summary_path = args.output.with_suffix(".summary.json")
-    summary_path.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+    summary_path.write_text(json.dumps(
+        summary, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(summary, indent=2))
     print(f"Per-instance results: {args.output}")
     print(f"Summary: {summary_path}")

@@ -77,7 +77,8 @@ def download_image(image: dict[str, Any], output_dir: Path) -> Path:
     with destination.open("rb") as image_file:
         if image_file.read(3) != b"\xff\xd8\xff":
             destination.unlink(missing_ok=True)
-            raise ValueError(f"Downloaded COCO image is not a JPEG: {destination}")
+            raise ValueError(
+                f"Downloaded COCO image is not a JPEG: {destination}")
     return destination
 
 
@@ -100,7 +101,8 @@ def download_subset(
         max_instances=max_instances,
     )
     selected_ids = set(ids)
-    selected_images = [image for image in coco["images"] if image["id"] in selected_ids]
+    selected_images = [image for image in coco["images"]
+                       if image["id"] in selected_ids]
     image_dir = output_dir / "images"
     annotation_dir = output_dir / "annotations"
     image_dir.mkdir(parents=True, exist_ok=True)

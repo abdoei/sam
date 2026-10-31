@@ -38,7 +38,8 @@ def main() -> None:
             continue
 
         mask_path = (
-            args.output / str(annotation["image_id"]) / f"{annotation['id']}.png"
+            args.output / str(annotation["image_id"]) /
+            f"{annotation['id']}.png"
         )
         mask_path.parent.mkdir(parents=True, exist_ok=True)
         Image.fromarray(mask.astype(np.uint8) * 255).save(mask_path)
@@ -56,7 +57,8 @@ def main() -> None:
     with index_path.open("w", newline="", encoding="utf-8") as index_file:
         writer = csv.DictWriter(
             index_file,
-            fieldnames=["ann_id", "image_id", "category_id", "area", "mask_path"],
+            fieldnames=["ann_id", "image_id",
+                        "category_id", "area", "mask_path"],
         )
         writer.writeheader()
         writer.writerows(rows)

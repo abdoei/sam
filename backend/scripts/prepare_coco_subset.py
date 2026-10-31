@@ -20,7 +20,8 @@ def select_image_ids(
     if sample_size < 1:
         raise ValueError("sample_size must be greater than zero")
     if min_instances < 0 or max_instances < min_instances:
-        raise ValueError("instance limits must satisfy 0 <= min_instances <= max_instances")
+        raise ValueError(
+            "instance limits must satisfy 0 <= min_instances <= max_instances")
 
     non_crowd_counts = Counter(
         int(annotation["image_id"])
@@ -50,9 +51,12 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=ROOT / "data/raw/annotations/instances_val2017.json",
     )
-    parser.add_argument("--images", type=Path, default=ROOT / "data/raw/val2017")
-    parser.add_argument("--output", type=Path, default=ROOT / "data/coco_subset")
-    parser.add_argument("--ids-output", type=Path, default=ROOT / "docs/selected_image_ids.json")
+    parser.add_argument("--images", type=Path,
+                        default=ROOT / "data/raw/val2017")
+    parser.add_argument("--output", type=Path,
+                        default=ROOT / "data/coco_subset")
+    parser.add_argument("--ids-output", type=Path,
+                        default=ROOT / "docs/selected_image_ids.json")
     parser.add_argument("--count", type=int, default=300)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--min-instances", type=int, default=1)
@@ -74,7 +78,8 @@ def main() -> None:
         max_instances=args.max_instances,
     )
     selected = set(selected_ids)
-    selected_images = [image for image in coco["images"] if image["id"] in selected]
+    selected_images = [image for image in coco["images"]
+                       if image["id"] in selected]
     missing_images = [
         image["file_name"]
         for image in selected_images
@@ -104,9 +109,11 @@ def main() -> None:
         ],
     }
     for image in selected_images:
-        shutil.copy2(args.images / image["file_name"], output_images / image["file_name"])
+        shutil.copy2(args.images / image["file_name"],
+                     output_images / image["file_name"])
 
-    args.ids_output.write_text(json.dumps(selected_ids, indent=2) + "\n", encoding="utf-8")
+    args.ids_output.write_text(json.dumps(
+        selected_ids, indent=2) + "\n", encoding="utf-8")
     (output_annotations / "subset.json").write_text(
         json.dumps(subset), encoding="utf-8"
     )

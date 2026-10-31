@@ -23,7 +23,8 @@ def model_status() -> dict[str, Any]:
 
     checkpoint = os.getenv("SAM2_CHECKPOINT", "")
     installed = find_spec("sam2") is not None
-    checkpoint_exists = bool(checkpoint) and Path(checkpoint).expanduser().is_file()
+    checkpoint_exists = bool(checkpoint) and Path(
+        checkpoint).expanduser().is_file()
     return {
         "ready": installed and checkpoint_exists,
         "installed": installed,
@@ -88,7 +89,8 @@ def segment_image(
                 )
             image = source.convert("RGB")
     except (UnidentifiedImageError, OSError) as exc:
-        raise HTTPException(status_code=400, detail="Uploaded file is not a valid image") from exc
+        raise HTTPException(
+            status_code=400, detail="Uploaded file is not a valid image") from exc
 
     width, height = image.size
     for point in prompt.points:
@@ -100,7 +102,8 @@ def segment_image(
     if prompt.box is not None:
         x0, y0, x1, y1 = prompt.box
         if x1 <= x0 or y1 <= y0:
-            raise HTTPException(status_code=422, detail="Box must have positive width and height")
+            raise HTTPException(
+                status_code=422, detail="Box must have positive width and height")
         if x1 > width or y1 > height:
             raise HTTPException(
                 status_code=422,
@@ -108,7 +111,8 @@ def segment_image(
             )
 
     point_coords = (
-        np.asarray([[point.x, point.y] for point in prompt.points], dtype=np.float32)
+        np.asarray([[point.x, point.y]
+                   for point in prompt.points], dtype=np.float32)
         if prompt.points
         else None
     )
@@ -117,7 +121,8 @@ def segment_image(
         if prompt.points
         else None
     )
-    box = np.asarray(prompt.box, dtype=np.float32) if prompt.box is not None else None
+    box = np.asarray(
+        prompt.box, dtype=np.float32) if prompt.box is not None else None
 
     with _prediction_lock:
         predictor = get_predictor()

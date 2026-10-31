@@ -12,7 +12,8 @@ def test_binary_mask_metrics_reports_iou_and_dice() -> None:
     prediction = np.array([[1, 1], [0, 0]], dtype=bool)
     ground_truth = np.array([[1, 0], [1, 0]], dtype=bool)
 
-    assert binary_mask_metrics(prediction, ground_truth) == {"iou": 1 / 3, "dice": 0.5}
+    assert binary_mask_metrics(prediction, ground_truth) == {
+        "iou": 1 / 3, "dice": 0.5}
 
 
 def test_binary_mask_metrics_rejects_mismatched_shapes() -> None:
@@ -32,7 +33,8 @@ def test_evaluate_manifest_joins_coco_annotation_ids(tmp_path) -> None:
     with index_path.open("w", newline="", encoding="utf-8") as index_file:
         writer = csv.DictWriter(
             index_file,
-            fieldnames=["ann_id", "image_id", "category_id", "area", "mask_path"],
+            fieldnames=["ann_id", "image_id",
+                        "category_id", "area", "mask_path"],
         )
         writer.writeheader()
         writer.writerow(

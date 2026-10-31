@@ -23,7 +23,8 @@ def test_load_annotations_reads_official_archive_member(tmp_path, monkeypatch) -
 
     monkeypatch.setattr(download_coco_subset, "_download_file", fake_download)
 
-    assert download_coco_subset.load_annotations(None, tmp_path / "download.zip") == payload
+    assert download_coco_subset.load_annotations(
+        None, tmp_path / "download.zip") == payload
     assert not (tmp_path / "download.zip").exists()
 
 
@@ -52,7 +53,8 @@ def test_download_subset_writes_ids_subset_and_selected_images(tmp_path, monkeyp
         downloaded.append(image["file_name"])
         return path
 
-    monkeypatch.setattr(download_coco_subset, "download_image", fake_download_image)
+    monkeypatch.setattr(download_coco_subset,
+                        "download_image", fake_download_image)
     ids_path = tmp_path / "selected_image_ids.json"
 
     image_count, annotation_count = download_coco_subset.download_subset(
@@ -74,4 +76,5 @@ def test_download_subset_writes_ids_subset_and_selected_images(tmp_path, monkeyp
         (tmp_path / "coco_subset/annotations/subset.json").read_text(encoding="utf-8")
     )
     assert {image["id"] for image in subset["images"]} == set(selected_ids)
-    assert {annotation["image_id"] for annotation in subset["annotations"]} == set(selected_ids)
+    assert {annotation["image_id"]
+            for annotation in subset["annotations"]} == set(selected_ids)

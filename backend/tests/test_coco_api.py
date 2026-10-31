@@ -36,7 +36,8 @@ def create_coco_fixture(tmp_path, monkeypatch) -> bytes:
         "categories": [{"id": 3, "name": "object"}],
     }
     (annotations_dir / "subset.json").write_text(json.dumps(subset), encoding="utf-8")
-    Image.new("RGB", (4, 4), color="white").save(images_dir / "sample.jpg", format="JPEG")
+    Image.new("RGB", (4, 4), color="white").save(
+        images_dir / "sample.jpg", format="JPEG")
 
     mask = Image.new("L", (4, 4))
     for x, y in ((1, 1), (2, 1), (1, 2), (2, 2)):
@@ -45,7 +46,8 @@ def create_coco_fixture(tmp_path, monkeypatch) -> bytes:
 
     output = BytesIO()
     mask.save(output, format="PNG")
-    monkeypatch.setenv("COCO_SUBSET_JSON", str(annotations_dir / "subset.json"))
+    monkeypatch.setenv("COCO_SUBSET_JSON", str(
+        annotations_dir / "subset.json"))
     monkeypatch.setenv("COCO_GT_DIR", str(tmp_path / "gt_masks"))
     monkeypatch.setenv("COCO_EVALUATION_DIR", str(tmp_path / "evaluation"))
     return output.getvalue()

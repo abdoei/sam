@@ -74,7 +74,8 @@ def test_segment_passes_writable_image_array_to_predictor(monkeypatch) -> None:
             return np.zeros((1, 12, 16), dtype=np.uint8), np.array([0.5]), None
 
     monkeypatch.setattr(segmentation, "get_predictor", Predictor)
-    monkeypatch.setitem(sys.modules, "torch", SimpleNamespace(inference_mode=nullcontext))
+    monkeypatch.setitem(sys.modules, "torch",
+                        SimpleNamespace(inference_mode=nullcontext))
 
     response = client.post(
         "/api/segment",
