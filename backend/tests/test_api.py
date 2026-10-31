@@ -34,6 +34,18 @@ def test_segment_requires_a_prompt() -> None:
     assert response.status_code == 422
 
 
+def test_segment_rejects_point_outside_image_before_model_loading(monkeypatch) -> None:
+    monkeypatch.delenv("SAM2_CHECKPOINT", raising=False)
+    response = client.post(
+        "/api/segment",
+        files={"image": ("sample.png", image_bytes(), "image/png")},
+        data={"prompt": '{"points": [{"x": 16, "y": 5, "label": 1}]}'},
+    )
+
+    assert response.status_code == 422
+    assert "within the 16x12 image" in response.json()["detail"]
+
+
 def test_segment_reports_missing_checkpoint(monkeypatch) -> None:
     monkeypatch.delenv("SAM2_CHECKPOINT", raising=False)
     response = client.post(
