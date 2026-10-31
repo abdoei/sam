@@ -124,7 +124,7 @@ def segment_image(
         import torch
 
         with torch.inference_mode():
-            predictor.set_image(np.asarray(image))
+            predictor.set_image(np.array(image, copy=True))
             masks, scores, _ = predictor.predict(
                 point_coords=point_coords,
                 point_labels=point_labels,

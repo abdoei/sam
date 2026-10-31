@@ -1,8 +1,13 @@
 import io
+import sys
+from contextlib import nullcontext
+from types import SimpleNamespace
 
+import numpy as np
 from fastapi.testclient import TestClient
 from PIL import Image
 
+from app import segmentation
 from app.main import app
 
 client = TestClient(app)
@@ -56,3 +61,26 @@ def test_segment_reports_missing_checkpoint(monkeypatch) -> None:
 
     assert response.status_code == 503
     assert "SAM2 checkpoint is not configured" in response.json()["detail"]
+
+
+def test_segment_passes_writable_image_array_to_predictor(monkeypatch) -> None:
+    observed: dict[str, bool] = {}
+
+    class Predictor:
+        def set_image(self, image: np.ndarray) -> None:
+            observed["writable"] = image.flags.writeable
+
+        def predict(self, **_kwargs):
+            return np.zeros((1, 12, 16), dtype=np.uint8), np.array([0.5]), None
+
+    monkeypatch.setattr(segmentation, "get_predictor", Predictor)
+    monkeypatch.setitem(sys.modules, "torch", SimpleNamespace(inference_mode=nullcontext))
+
+    response = client.post(
+        "/api/segment",
+        files={"image": ("sample.png", image_bytes(), "image/png")},
+        data={"prompt": '{"points": [{"x": 4, "y": 5, "label": 1}]}'},
+    )
+
+    assert response.status_code == 200
+    assert observed["writable"] is True
