@@ -70,14 +70,14 @@ The official-source, 300-image COCO download and checkpoint reproduction steps
 are documented in [`data/README.md`](data/README.md). From `backend/`, run:
 
 ```sh
-uv run python scripts/download_coco_subset.py
-uv run python scripts/export_gt_masks.py
+uv run python -m scripts.download_coco_subset
+uv run python -m scripts.export_gt_masks
 ```
 
 To inspect the downloaded subset:
 
 ```sh
-uv run python scripts/inspect_coco.py data/coco_subset/annotations/subset.json
+uv run python -m scripts.inspect_coco data/coco_subset/annotations/subset.json
 ```
 
 The subset downloader selects 300 images from COCO 2017 val using seed 42 and
@@ -90,8 +90,8 @@ The inspection and local-copy scripts are still available for an already-downloa
 full COCO structure:
 
 ```sh
-uv run python scripts/inspect_coco.py
-uv run python scripts/prepare_coco_subset.py
+uv run python -m scripts.inspect_coco
+uv run python -m scripts.prepare_coco_subset
 ```
 
 For evaluation, download each accepted mask using its COCO annotation ID and create
@@ -107,7 +107,7 @@ the mask. Use the same start/stop definition for the manual-polygon baseline. Th
 from `backend/`, run:
 
 ```sh
-uv run python scripts/evaluate_masks.py
+uv run python -m scripts.evaluate_masks
 ```
 
 The script writes per-instance IoU and Dice along with aggregate means and any

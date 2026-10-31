@@ -14,8 +14,8 @@ S3 URL for the same official `images.cocodataset.org` bucket.
 From `backend/`:
 
 ```sh
-uv run python scripts/download_coco_subset.py
-uv run python scripts/export_gt_masks.py
+uv run python -m scripts.download_coco_subset
+uv run python -m scripts.export_gt_masks
 ```
 
 By default, the script selects 300 images from `val2017`, with 1–8 non-crowd
@@ -34,7 +34,7 @@ data/coco_subset/
 The sampling rules can be adjusted explicitly, for example:
 
 ```sh
-uv run python scripts/download_coco_subset.py \
+uv run python -m scripts.download_coco_subset \
   --count 300 --seed 42 --min-instances 1 --max-instances 8 --workers 8
 ```
 
@@ -61,7 +61,8 @@ curl --fail --location --retry 3 \
 shasum -a 256 data/checkpoints/sam2.1_hiera_tiny.pt
 ```
 
-Record the SHA-256 printed on your machine with your experiment notes. The
+The verified SHA-256 for the downloaded checkpoint is
+`7402e0d864fa82708a20fbd15bc84245c2f26dff0eb43a4b5b93452deb34be69`. The
 checkpoint is intentionally not tracked in Git. For local inference, install the
 optional model dependency from `backend/` and point the app to this file:
 
