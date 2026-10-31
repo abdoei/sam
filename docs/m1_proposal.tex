@@ -1,9 +1,5 @@
 \documentclass[11pt]{article}
 
-% ============================================================
-% Milestone 1 -- Project Proposal & Literature Review Template
-% DIP Team Project
-% ============================================================
 \usepackage[margin=1in]{geometry}
 \usepackage[T1]{fontenc}
 \usepackage[utf8]{inputenc}
@@ -14,111 +10,196 @@
 \usepackage{hyperref}
 \hypersetup{colorlinks=true, linkcolor=blue!50!black, citecolor=blue!50!black, urlcolor=blue!50!black}
 \usepackage{enumitem}
-\usepackage{xcolor}
 
-\newcommand{\todo}[1]{\textcolor{red}{\textbf{[TODO: #1]}}}
-
-\title{\LARGE Project Proposal \& Literature Review \\[4pt]
-\large \todo{Project Title}}
+\title{\LARGE Prompt-Driven Interactive Segmentation\\[4pt]
+\large as a Dataset-Annotation Tool}
 \author{
-  \todo{Student A Full Name} \and
-  \todo{Student B Full Name}
+  \begin{tabular}{c}
+    Student A: 2301498\\
+    Abdelhafeez Aref Abdelhafeez Almaz
+  \end{tabular}
+  \and
+  \begin{tabular}{c}
+    Student B: 2501925\\
+    Abdelrahman Eid Ashour Mohamed
+  \end{tabular}
 }
-\date{Milestone 1 --- \todo{Date} \\{} [COURSE CODE] --- Digital Image Processing}
+\date{Milestone 1 --- October 31, 2026\\CSE 681 --- Digital Image Processing}
 
 \begin{document}
 \maketitle
 
 \begin{abstract}
-\todo{3--5 sentences: what problem are you tackling, why does it matter, what is your
-planned approach, and what public dataset/baseline will you use. Write this last.}
+Producing accurate instance masks for image datasets is time-consuming when
+every object must be outlined manually. We propose a local interactive
+annotation tool that uses positive/negative point and box prompts with the
+frozen SAM 2.1 Hiera-Tiny model, and measures annotation time and mask agreement
+with existing ground truth. We will use a deterministic 300-image subset of
+COCO 2017 val2017, retain its non-crowd instance masks, and compare prompted
+annotation against manual polygon labeling on the same target objects. The
+project will report per-instance intersection over union (IoU), Dice, annotation
+time, and inference latency without training a model or claiming results before
+they are measured.
 \end{abstract}
 
 \section{Problem Statement \& Motivation}
 \label{sec:motivation}
-\todo{What image-processing problem are you solving? Why is it interesting or useful?
-How does it connect to material from the course (name the week/topic)? 1 paragraph.}
+Instance segmentation assigns a pixel mask to each object in an image, but
+creating these masks by hand is labor-intensive and can limit the scale of
+downstream image-processing experiments. This project investigates whether
+prompt-driven segmentation can reduce human annotation effort while retaining
+useful agreement with reference masks. The work connects directly to the course
+topics of digital image segmentation, region delineation, binary-mask
+representation, and quantitative evaluation. Rather than train a new
+segmentation model, we will build a reproducible human-in-the-loop tool around a
+frozen pretrained model and evaluate both the resulting masks and the time
+required to accept them.
 
 \section{Related Work}
 \label{sec:related}
-\todo{Summarize at least 4 references, at least 2 of which should be from 2023--2026.
-Use the table below as a starting organizer, then write 1--2 paragraphs of prose
-connecting them to your plan.}
+Promptable segmentation builds on interactive segmentation and recent
+foundation-model approaches. GrabCut established a classic interactive
+foreground-extraction method in which user input guides iterative graph-cut
+optimization \citep{rother2004grabcut}. The Segment Anything Model (SAM)
+introduced a promptable model trained at large scale and evaluated with
+point/box prompts \citep{kirillov2023sam}. SAM 2 extends promptable segmentation
+to images and videos with a streaming memory architecture; we use its image
+predictor rather than training a model from scratch \citep{ravi2024sam2}.
+FastSAM is a recent alternative that seeks faster segment-anything behavior
+with a different model pipeline \citep{zhao2023fastsam}.
 
-\begin{table}[h]
+Our project is a small systems and evaluation study, not a new foundation model
+or a reproduction of SAM 2 training. COCO provides the images and instance masks
+needed for a post-hoc comparison \citep{lin2014coco}. We will compare an
+interactive SAM 2.1 workflow with manual polygon annotation on matching target
+objects. The evaluation will separate model inference latency from end-to-end
+annotation time, and will use the held-out COCO mask only for scoring, not to
+choose prompts or candidate masks.
+
+\begin{table}[ht]
 \centering
 \caption{Key references.}
 \label{tab:refs}
-\begin{tabular}{@{}p{0.30\linewidth}p{0.12\linewidth}p{0.45\linewidth}@{}}
+\begin{tabular}{@{}p{0.29\linewidth}p{0.08\linewidth}p{0.53\linewidth}@{}}
 \toprule
 \textbf{Reference} & \textbf{Year} & \textbf{Relevance to this project} \\
 \midrule
-\citep{example2024} & 2024 & \todo{one sentence} \\
-\citep{example2018}  & 2018 & \todo{one sentence} \\
+\citep{rother2004grabcut} & 2004 & Classic interactive foreground extraction guided by user input. \\
+\citep{lin2014coco} & 2014 & Public images and instance-segmentation ground truth for evaluation. \\
+\citep{kirillov2023sam} & 2023 & Promptable segmentation with points, boxes, and masks. \\
+\citep{zhao2023fastsam} & 2023 & Recent promptable segmentation alternative for related-work context. \\
+\citep{ravi2024sam2} & 2024 & Frozen image/video segmentation model used by our tool. \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 \section{Dataset \& Baseline Plan}
 \label{sec:data}
-\todo{Name the public dataset(s), give exact size/subset you will use, and the license.
-State exactly which baseline (classical or prior learned method) you will reproduce
-and compare against.}
+We will sample 300 images from COCO 2017 val2017. Candidate images must have
+between one and eight non-crowd instance annotations; candidates are sorted and
+sampled with Python's pseudorandom generator using seed 42. We will record the
+selected image IDs, retain the corresponding instance annotations, and exclude
+crowd regions from scoring. The COCO images retain their individual source
+licenses, so we will follow the license metadata for every image and will not
+redistribute the images or derived masks. COCO's terms are documented by the
+dataset maintainers \citep{cocoTerms}.
 
-\begin{table}[h]
+The primary baseline is manual polygon annotation of the same target object in
+each evaluated image, using a standard polygon annotation interface without SAM
+assistance. Student A will record active annotation time using the same start
+and stop definition used by the interactive tool. For the prompted method,
+Student B will record time from the first prompt through accepting the mask;
+inference latency will be logged separately. Before either method is run, the
+target COCO instance ID will be recorded. After each mask is finalized, we will
+compare it with its matching COCO non-crowd instance mask. The reference mask
+will not be exposed while prompts are chosen.
+
+\begin{table}[ht]
 \centering
 \caption{Dataset summary.}
 \label{tab:data}
-\begin{tabular}{@{}lll@{}}
+\begin{tabular}{@{}p{0.20\linewidth}p{0.43\linewidth}p{0.27\linewidth}@{}}
 \toprule
-\textbf{Dataset} & \textbf{Subset used} & \textbf{Link} \\
+\textbf{Dataset} & \textbf{Subset used} & \textbf{Link / terms} \\
 \midrule
-\todo{name} & \todo{e.g., 800 train / 100 val crops} & \todo{URL} \\
+COCO 2017 & 300 val2017 images; seed 42; 1--8 non-crowd instances per image & \url{https://cocodataset.org/} \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 \section{Proposed Method}
 \label{sec:method}
-\todo{Sketch your planned approach: architecture diagram or pseudocode, what is novel
-or extended relative to the baseline, and why you expect it to work.}
+The application has a React/TypeScript browser interface and a Python/FastAPI
+backend. The backend runs the frozen SAM 2.1 Hiera-Tiny image predictor with
+positive or negative point prompts and/or a box prompt. For each request, the
+predictor returns candidate masks and confidence scores; the tool displays the
+highest-scoring candidate for human review. The annotator can refine prompts,
+accept the mask, and save it. The evaluation pipeline associates the accepted
+mask with its COCO annotation ID, then computes binary-mask IoU and Dice against
+the corresponding ground truth. The annotation timer starts at the first prompt
+and ends when the annotator accepts the mask; inference time is measured
+separately. The main contribution is a small, reproducible
+annotation-and-measurement workflow, not a change to SAM 2's model architecture.
 
 \section{Feasibility \& Compute Plan}
 \label{sec:feasibility}
-\todo{State your compute tier (CPU-OK / GPU-light), expected training time per
-experiment, and confirm this fits a laptop-class machine within the project window.}
+The project is CPU-OK because it performs inference with a frozen, small SAM 2.1
+checkpoint and does not train or fine-tune the model. The selected Hiera-Tiny
+checkpoint is approximately 149 MiB; inference latency will be measured on the
+available machine and reported rather than assumed. The 300-image subset is
+small enough for local storage and evaluation. If CPU inference is too slow for
+the full study, we will first complete the MVP on a fixed smaller sample and
+report the actual sample size and device.
 
 \subsection{Minimum Viable Deliverable (MVP)}
-\todo{The smallest version of this project that still produces a valid, reportable
-comparison against the baseline.}
+Run the interactive tool end-to-end on a fixed sample of 30 COCO images; measure
+manual polygon and prompted annotation time on matching target objects; save
+both methods' masks; and report mean/median annotation time, mean IoU and Dice,
+and per-image results. The sample IDs, prompts, device, model checkpoint, and
+timing protocol will be recorded so the comparison can be reproduced.
 
 \subsection{Stretch Goal}
-\todo{What you will attempt if the MVP is on track by Week 5--6.}
+Expand the comparison to all 300 images, report results by object category and
+prompt type (click versus box), include representative failure cases, and run a
+small usability test with a second annotator.
 
 \section{Risk Assessment}
 \label{sec:risk}
 \begin{itemize}[leftmargin=*]
-  \item \todo{Risk 1 and its mitigation / fallback.}
-  \item \todo{Risk 2 and its mitigation / fallback.}
+  \item \textbf{CPU latency or memory limits:} use the Hiera-Tiny checkpoint,
+  measure inference separately from annotation time, and reduce the evaluated
+  sample to the predeclared MVP if needed; no training is required.
+  \item \textbf{Dataset retrieval or license variation:} download only the
+  selected COCO images from the official source, preserve the selected IDs and
+  annotation metadata, and follow each image's source license; do not commit or
+  publicly redistribute dataset assets.
+  \item \textbf{Prompt and ground-truth mismatch:} identify the target instance
+  before annotation, keep its COCO annotation ID with the result, and score only
+  after acceptance; crowd regions and empty masks are excluded.
 \end{itemize}
 
 \section{Work Breakdown}
 \label{sec:workbreakdown}
-\begin{table}[h]
+\begin{table}[ht]
 \centering
-\caption{Milestone task allocation (see also the course project catalog entry for this
-project).}
+\caption{Milestone task allocation. Student B combines the catalog's model and evaluation roles.}
 \label{tab:tasks}
 \begin{tabular}{@{}p{0.12\linewidth}p{0.39\linewidth}p{0.39\linewidth}@{}}
 \toprule
-\textbf{Milestone} & \textbf{Student A --- Data \& Baseline} & \textbf{Student B --- Model + Evaluation (B+C combined)} \\
+\textbf{Milestone} & \textbf{Student A --- Data \& Baseline} & \textbf{Student B --- Model + Evaluation} \\
 \midrule
-M1 (Wk 3) & COCO subset and ground-truth masks prepared & Minimal click/box UI, SAM2 inference demo, and evaluation protocol \\
-M2 (Wk 6) & Manual-baseline timing and dataset checks & Working interactive tool and preliminary IoU comparison \\
-M3 (Wk 9) & Final manual-baseline timing & Usability polish, full time/IoU analysis, and user test \\
+M1 (Wk 3) & Prepare the COCO subset and ground-truth masks; define the manual-polygon timing protocol. & Build the click/box interface, run SAM 2 inference, and define the IoU/time evaluation protocol. \\
+M2 (Wk 6) & Measure manual polygon time on the shared sample and verify target-mask IDs. & Deliver the interactive tool and first IoU/time comparison; combine catalog roles B and C. \\
+M3 (Wk 9) & Complete manual-baseline timing and data checks. & Polish the tool; complete the full comparison, failure analysis, and small user test. \\
 \bottomrule
 \end{tabular}
 \end{table}
+
+\section*{AI Tool Usage Disclosure}
+AI assistance was used for initial code scaffolding and drafting/editing this
+proposal. The team will verify the implementation, citations, measurements, and
+final technical claims, and will revise the report to reflect work they have
+personally reviewed and understand.
 
 \bibliographystyle{unsrtnat}
 \bibliography{references}
