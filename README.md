@@ -47,10 +47,18 @@ Open the URL printed by Vite. The frontend proxies `/api` requests to
 `http://127.0.0.1:8000`.
 
 To install SAM2 in the Python environment, run `uv sync --extra sam2 --group dev`
-from `backend`. Set `SAM2_CHECKPOINT` to the downloaded checkpoint file and
-`SAM2_CONFIG` to the matching SAM2 configuration name/path before starting the
-backend. The default configuration targets the small SAM2.1 Hiera-T model; do not
-pair a checkpoint with a different model configuration.
+from `backend`. After downloading the matching SAM2.1 Hiera-Tiny checkpoint, set
+the model configuration and local checkpoint path before starting the backend:
+
+```sh
+export SAM2_CONFIG=configs/sam2.1/sam2.1_hiera_t.yaml
+export SAM2_CHECKPOINT="$HOME/models/sam2.1_hiera_tiny.pt"
+export SAM2_DEVICE=cpu
+```
+
+The default configuration targets the small SAM2.1 Hiera-Tiny model; do not pair
+a checkpoint with a different model configuration. Uploads are limited to 15 MiB
+and 25 million pixels to keep local inference within reasonable memory bounds.
 
 Until the checkpoint is installed and configured, the API reports that inference
 is unavailable and returns an explicit error for segmentation requests; it does
@@ -110,7 +118,8 @@ dimension mismatches rather than silently skipping samples.
 The subset selection seed and filtering rules are explicit in the scripts. Keep
 the selected image IDs, annotation split, software lockfiles, model configuration,
 and checkpoint identity with any reported result. Do not report placeholder or
-unmeasured timing/quality values.
+unmeasured timing/quality values. Commit `docs/selected_image_ids.json` after
+generating the subset, but do not commit the COCO images or derived masks.
 
 The COCO subset and mask-export workflow follows the public artifact layout shared
 by the Student A project at
