@@ -69,7 +69,7 @@ with metric display. Downloaded images, masks, checkpoint, and evaluation
 outputs are excluded from Git; reproduction instructions are tracked.
 The images retain their individual terms of use \citep{cocoTerms}.
 
-The COCO data/API tests pass (16 backend tests in total), and the frontend
+The COCO data/API tests pass (17 backend tests in total), and the frontend
 TypeScript build and lint checks pass. These are software-validation results,
 not segmentation experiments. The optional SAM 2 dependency and downloaded
 checkpoint were configured together, and the FastAPI segmentation route
@@ -117,7 +117,7 @@ Manual polygon baseline & 0 measured & Not measured & Not measured \\
 SAM 2.1 smoke test & 1 generated; 0 scored & Not measured & 1.56 s per first API request \\
 \midrule
 Prepared COCO subset & 979 masks & -- & -- \\
-Automated backend tests & 16 passed & -- & -- \\
+Automated backend tests & 17 passed & -- & -- \\
 \bottomrule
 \end{tabular}
 \end{table}
