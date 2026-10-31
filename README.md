@@ -52,7 +52,7 @@ the model configuration and local checkpoint path before starting the backend:
 
 ```sh
 export SAM2_CONFIG=configs/sam2.1/sam2.1_hiera_t.yaml
-export SAM2_CHECKPOINT="$HOME/models/sam2.1_hiera_tiny.pt"
+export SAM2_CHECKPOINT="$PWD/../data/checkpoints/sam2.1_hiera_tiny.pt"
 export SAM2_DEVICE=cpu
 ```
 
@@ -86,6 +86,13 @@ val2017 image archive. The selected IDs are recorded in
 `docs/selected_image_ids.json`. All image, annotation, mask, and checkpoint
 artifacts are ignored by Git. Read the source image licenses before redistribution.
 
+In the web app, choose a COCO sample and target object, add prompts, generate a
+mask, and accept it to save the prediction and its annotation time. The backend
+compares it with the matching ground-truth mask and records IoU/Dice in the
+annotation record; accepted predictions and timings are stored in the ignored
+`data/evaluation/` directory. Uploaded images can be segmented and timed, but
+COCO ground-truth metrics are only available for the bundled COCO subset.
+
 The inspection and local-copy scripts are still available for an already-downloaded
 full COCO structure:
 
@@ -94,8 +101,8 @@ uv run python -m scripts.inspect_coco
 uv run python -m scripts.prepare_coco_subset
 ```
 
-For evaluation, download each accepted mask using its COCO annotation ID and create
-`data/evaluation/predictions.csv`:
+For manually created masks, the standalone evaluator also accepts a CSV manifest
+at `data/evaluation/predictions.csv`:
 
 ```csv
 ann_id,prediction_path,elapsed_seconds

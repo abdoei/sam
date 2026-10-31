@@ -46,6 +46,29 @@ type SegmentResponse = {
   mask_png_base64: string
 }
 
+type CocoAnnotation = {
+  id: number
+  category_id: number
+  category_name: string
+  area: number
+}
+
+type CocoImage = {
+  id: number
+  file_name: string
+  width: number
+  height: number
+  annotations: CocoAnnotation[]
+}
+
+type SavedAnnotation = {
+  saved: boolean
+  iou: number
+  dice: number
+  elapsed_seconds: number
+  manifest_path: string
+}
+
 const toolLabels: Record<Tool, string> = {
   positive: 'Add object point',
   negative: 'Add background point',
@@ -61,6 +84,8 @@ function errorMessage(detail: unknown): string {
 function App() {
   const [file, setFile] = useState<File | null>(null)
   const [annotationId, setAnnotationId] = useState('')
+  const [cocoImages, setCocoImages] = useState<CocoImage[]>([])
+  const [selectedCocoImageId, setSelectedCocoImageId] = useState<number | null>(null)
   const [imageUrl, setImageUrl] = useState<string | null>(null)
   const [imageSize, setImageSize] = useState<ImageSize | null>(null)
   const [tool, setTool] = useState<Tool>('positive')
@@ -71,6 +96,10 @@ function App() {
   const [health, setHealth] = useState<HealthResponse | null>(null)
   const [healthError, setHealthError] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [datasetError, setDatasetError] = useState<string | null>(null)
+  const [savedAnnotation, setSavedAnnotation] = useState<SavedAnnotation | null>(null)
+  const [isLoadingCocoImage, setIsLoadingCocoImage] = useState(false)
+  const [isSavingAnnotation, setIsSavingAnnotation] = useState(false)
   const [isRunning, setIsRunning] = useState(false)
   const [inferenceMs, setInferenceMs] = useState<number | null>(null)
   const [annotationSeconds, setAnnotationSeconds] = useState<number | null>(null)
@@ -96,6 +125,31 @@ function App() {
         if (active) {
           setHealth(null)
           setHealthError(reason instanceof Error ? reason.message : String(reason))
+        }
+      })
+    return () => {
+      active = false
+    }
+  }, [])
+
+  useEffect(() => {
+    let active = true
+    fetch('/api/coco/images')
+      .then(async (response) => {
+        const body = await response.json()
+        if (!response.ok) throw new Error(errorMessage(body.detail))
+        return body as { images: CocoImage[] }
+      })
+      .then((result) => {
+        if (active) {
+          setCocoImages(result.images)
+          setDatasetError(null)
+        }
+      })
+      .catch((reason: unknown) => {
+        if (active) {
+          setCocoImages([])
+          setDatasetError(reason instanceof Error ? reason.message : String(reason))
         }
       })
     return () => {
@@ -192,15 +246,55 @@ function App() {
   function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     const nextFile = event.currentTarget.files?.[0] ?? null
     setFile(nextFile)
+    setSelectedCocoImageId(null)
+    setAnnotationId('')
     setImageUrl(nextFile ? URL.createObjectURL(nextFile) : null)
     setImageSize(null)
     setMask(null)
     setPoints([])
     setBox(null)
+    setDraftBox(null)
+    boxStart.current = null
     setError(null)
     setInferenceMs(null)
     setAnnotationSeconds(null)
+    setSavedAnnotation(null)
     annotationStart.current = null
+  }
+
+  async function loadCocoImage(imageId: number) {
+    const record = cocoImages.find((image) => image.id === imageId)
+    if (!record) return
+    setIsLoadingCocoImage(true)
+    setDatasetError(null)
+    try {
+      const response = await fetch(`/api/coco/images/${imageId}`)
+      if (!response.ok) {
+        const body = await response.json()
+        throw new Error(errorMessage(body.detail))
+      }
+      const blob = await response.blob()
+      const nextFile = new File([blob], record.file_name, { type: blob.type || 'image/jpeg' })
+      setFile(nextFile)
+      setSelectedCocoImageId(imageId)
+      setAnnotationId(record.annotations[0]?.id.toString() ?? '')
+      setImageUrl(URL.createObjectURL(nextFile))
+      setImageSize(null)
+      setPoints([])
+      setBox(null)
+      setDraftBox(null)
+      boxStart.current = null
+      setMask(null)
+      setError(null)
+      setInferenceMs(null)
+      setAnnotationSeconds(null)
+      setSavedAnnotation(null)
+      annotationStart.current = null
+    } catch (reason: unknown) {
+      setDatasetError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setIsLoadingCocoImage(false)
+    }
   }
 
   function startAnnotation() {
@@ -215,6 +309,7 @@ function App() {
     startAnnotation()
     setPoints((current) => [...current, { ...coordinate, label: tool === 'positive' ? 1 : 0 }])
     setMask(null)
+    setSavedAnnotation(null)
     setError(null)
   }
 
@@ -255,6 +350,7 @@ function App() {
     if (nextBox.x1 - nextBox.x0 < 3 || nextBox.y1 - nextBox.y0 < 3) return
     setBox(nextBox)
     setMask(null)
+    setSavedAnnotation(null)
     setError(null)
   }
 
@@ -267,6 +363,7 @@ function App() {
     setError(null)
     setInferenceMs(null)
     setAnnotationSeconds(null)
+    setSavedAnnotation(null)
     annotationStart.current = null
   }
 
@@ -311,10 +408,46 @@ function App() {
     link.click()
   }
 
-  function acceptAnnotation() {
+  async function acceptAnnotation() {
     if (annotationStart.current === null) return
-    setAnnotationSeconds((performance.now() - annotationStart.current) / 1000)
-    annotationStart.current = null
+    const elapsedSeconds = (performance.now() - annotationStart.current) / 1000
+    if (selectedCocoImageId !== null && annotationId) {
+      setIsSavingAnnotation(true)
+      setError(null)
+      try {
+        const response = await fetch('/api/annotations', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            image_id: selectedCocoImageId,
+            annotation_id: Number(annotationId),
+            elapsed_seconds: elapsedSeconds,
+            mask_png_base64: mask?.mask_png_base64,
+            prompt: {
+              points,
+              box: box ? [box.x0, box.y0, box.x1, box.y1] : null,
+            },
+          }),
+        })
+        const body = (await response.json()) as SavedAnnotation | { detail?: unknown }
+        if (!response.ok) {
+          throw new Error(errorMessage('detail' in body ? body.detail : null))
+        }
+        if (!('iou' in body) || !('dice' in body)) {
+          throw new Error('The backend response did not contain evaluation metrics.')
+        }
+        setSavedAnnotation(body)
+        setAnnotationSeconds(elapsedSeconds)
+        annotationStart.current = null
+      } catch (reason: unknown) {
+        setError(reason instanceof Error ? reason.message : String(reason))
+      } finally {
+        setIsSavingAnnotation(false)
+      }
+    } else {
+      setAnnotationSeconds(elapsedSeconds)
+      annotationStart.current = null
+    }
   }
 
   const canRun = Boolean(file && (points.length || box) && !isRunning)
@@ -341,7 +474,7 @@ function App() {
 
       <section className="intro">
         <div>
-          <p className="eyebrow">INTERACTIVE SEGMENTATION · MILESTONE 1</p>
+          <p className="eyebrow">INTERACTIVE SEGMENTATION · MILESTONE 2</p>
           <h1>Label with a few prompts.</h1>
           <p className="subtitle">
             Add object or background clicks, or draw a box. SAM2 generates a local mask for review.
@@ -376,6 +509,24 @@ function App() {
                 </button>
               ))}
             </div>
+            <label className="coco-sample-select">
+              <span>COCO sample</span>
+              <select
+                aria-label="Choose a COCO validation image"
+                disabled={!cocoImages.length || isLoadingCocoImage}
+                onChange={(event) => {
+                  if (event.currentTarget.value) void loadCocoImage(Number(event.currentTarget.value))
+                }}
+                value={selectedCocoImageId ?? ''}
+              >
+                <option value="">{cocoImages.length ? 'Select image…' : 'Dataset unavailable'}</option>
+                {cocoImages.map((image) => (
+                  <option key={image.id} value={image.id}>
+                    {image.id} · {image.file_name}
+                  </option>
+                ))}
+              </select>
+            </label>
             <button className="text-button" onClick={clearPrompts} type="button" disabled={!points.length && !box && !mask}>
               Clear
             </button>
@@ -463,17 +614,51 @@ function App() {
               <span><i className="legend-dot negative-dot" /> Background</span>
               <span><i className="legend-box" /> Box</span>
             </div>
-            <label className="annotation-id-field">
-              COCO annotation ID <span>(for IoU evaluation)</span>
-              <input
-                inputMode="numeric"
-                min="1"
-                onChange={(event) => setAnnotationId(event.currentTarget.value)}
-                placeholder="Optional"
-                type="number"
-                value={annotationId}
-              />
-            </label>
+            {selectedCocoImageId !== null ? (
+              <label className="annotation-id-field">
+                Target COCO object <span>(ground truth hidden)</span>
+                <select
+                  onChange={(event) => {
+                    setAnnotationId(event.currentTarget.value)
+                    setPoints([])
+                    setBox(null)
+                    setDraftBox(null)
+                    setMask(null)
+                    setInferenceMs(null)
+                    setAnnotationSeconds(null)
+                    setSavedAnnotation(null)
+                    annotationStart.current = null
+                  }}
+                  value={annotationId}
+                >
+                  {cocoImages
+                    .find((image) => image.id === selectedCocoImageId)
+                    ?.annotations.map((annotation) => (
+                      <option key={annotation.id} value={annotation.id}>
+                        {annotation.category_name} · #{annotation.id}
+                      </option>
+                    ))}
+                </select>
+              </label>
+            ) : (
+              <label className="annotation-id-field">
+                COCO annotation ID <span>(for naming downloads)</span>
+                <input
+                  inputMode="numeric"
+                  min="1"
+                  onChange={(event) => setAnnotationId(event.currentTarget.value)}
+                  placeholder="Optional"
+                  type="number"
+                  value={annotationId}
+                />
+              </label>
+            )}
+            {datasetError && (
+              <p className="error-message" role="status">
+                COCO samples unavailable: {datasetError}
+              </p>
+            )}
+            {isLoadingCocoImage && <p className="helper-text">Loading COCO image…</p>}
             {health && !health.model.ready && (
               <p className="setup-hint" role="status">
                 {!health.model.installed
@@ -503,8 +688,13 @@ function App() {
                 <div className="result-summary">
                   <p>SAM2 confidence score <strong>{mask.score.toFixed(3)}</strong></p>
                   {annotationSeconds === null && (
-                    <button className="secondary-button" onClick={acceptAnnotation} type="button">
-                      Accept annotation
+                    <button
+                      className="secondary-button"
+                      disabled={isSavingAnnotation}
+                      onClick={() => void acceptAnnotation()}
+                      type="button"
+                    >
+                      {isSavingAnnotation ? 'Saving…' : 'Accept annotation'}
                     </button>
                   )}
                   <button className="secondary-button" onClick={downloadMask} type="button">
@@ -514,6 +704,13 @@ function App() {
                 {annotationSeconds !== null && (
                   <p className="runtime-note">
                     Total annotation time: {annotationSeconds.toFixed(2)}s (from first prompt to acceptance)
+                  </p>
+                )}
+                {savedAnnotation && (
+                  <p className="evaluation-metrics">
+                    Ground-truth comparison · IoU <strong>{savedAnnotation.iou.toFixed(3)}</strong>
+                    {' · '}Dice <strong>{savedAnnotation.dice.toFixed(3)}</strong>
+                    <span>Saved to the local evaluation manifest.</span>
                   </p>
                 )}
               </>
@@ -538,7 +735,7 @@ function App() {
       </div>
 
       <footer className="page-footer">
-        <span>Local inference · Images stay in this browser session</span>
+        <span>Local inference · Images are processed on this machine</span>
         <span>Backend: {health?.model.device ?? '—'} · {health?.model.config ?? 'SAM2.1 Hiera-T'}</span>
       </footer>
     </main>

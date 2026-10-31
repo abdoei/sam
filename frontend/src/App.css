@@ -137,9 +137,35 @@ h1 {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   min-height: 58px;
   padding: 9px 13px;
   border-bottom: 1px solid var(--border);
+}
+
+.coco-sample-select {
+  display: grid;
+  min-width: 150px;
+  gap: 4px;
+  color: #99a4b4;
+  font-size: 9px;
+}
+
+.coco-sample-select select,
+.annotation-id-field select {
+  width: 100%;
+  min-height: 34px;
+  padding: 0 9px;
+  border: 1px solid #35414d;
+  border-radius: 6px;
+  background: #141a21;
+  color: #e8edf4;
+  font: inherit;
+  font-size: 10px;
+}
+
+.coco-sample-select select {
+  max-width: 230px;
 }
 
 .tool-group {
@@ -456,6 +482,10 @@ h2 {
   font-size: 11px;
 }
 
+.annotation-id-field select {
+  grid-column: 1 / -1;
+}
+
 .annotation-id-field input::placeholder {
   color: #6f7a88;
 }
@@ -531,6 +561,23 @@ h2 {
   color: #808b9b;
   font-size: 10px;
   line-height: 1.55;
+}
+
+.evaluation-metrics {
+  margin: 12px 0 0;
+  color: #b6c0cd;
+  font-size: 10px;
+  line-height: 1.6;
+}
+
+.evaluation-metrics strong {
+  color: #81dfb7;
+  font-variant-numeric: tabular-nums;
+}
+
+.evaluation-metrics span {
+  display: block;
+  color: #808b9b;
 }
 
 .result-summary {
@@ -655,7 +702,12 @@ h2 {
   }
 
   .canvas-toolbar {
+    flex-wrap: wrap;
     padding: 8px;
+  }
+
+  .coco-sample-select {
+    flex: 1 1 180px;
   }
 
   .page-footer {
