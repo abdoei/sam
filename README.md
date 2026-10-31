@@ -66,32 +66,33 @@ not generate substitute masks.
 
 ## COCO data layout
 
-Download the COCO 2017 validation images and annotations from the official
-[COCO download page](https://cocodataset.org/#download), then extract them without
-committing the dataset:
+The official-source, 300-image COCO download and checkpoint reproduction steps
+are documented in [`data/README.md`](data/README.md). From `backend/`, run:
 
-```text
-data/
-└── raw/
-    ├── val2017/
-    │   └── 000000000139.jpg
-    └── annotations/
-        └── instances_val2017.json
+```sh
+uv run python scripts/download_coco_subset.py
+uv run python scripts/export_gt_masks.py
 ```
 
-From `backend/`, inspect the raw annotation format and prepare the subset:
+To inspect the downloaded subset:
+
+```sh
+uv run python scripts/inspect_coco.py data/coco_subset/annotations/subset.json
+```
+
+The subset downloader selects 300 images from COCO 2017 val using seed 42 and
+1–8 non-crowd instances per image; it fetches only those JPEGs, not the full
+val2017 image archive. The selected IDs are recorded in
+`docs/selected_image_ids.json`. All image, annotation, mask, and checkpoint
+artifacts are ignored by Git. Read the source image licenses before redistribution.
+
+The inspection and local-copy scripts are still available for an already-downloaded
+full COCO structure:
 
 ```sh
 uv run python scripts/inspect_coco.py
 uv run python scripts/prepare_coco_subset.py
-uv run python scripts/export_gt_masks.py
 ```
-
-The preprocessing scripts deterministically select 300 images (seed 42) with
-1–8 non-crowd instances, write the chosen COCO image IDs, and export binary
-ground-truth masks. Read the source dataset's license and
-individual image terms before sharing any data or demo output; the dataset is not
-included in this repository.
 
 For evaluation, download each accepted mask using its COCO annotation ID and create
 `data/evaluation/predictions.csv`:
