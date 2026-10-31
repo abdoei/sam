@@ -1,0 +1,308 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage[round]{natbib}
+\usepackage{hyperref}
+\hypersetup{colorlinks=true, linkcolor=blue!50!black, citecolor=blue!50!black, urlcolor=blue!50!black}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{caption}
+\usepackage{subcaption}
+
+\title{\LARGE Prompt-Driven Interactive Segmentation\\
+\large as a Dataset-Annotation Tool\\[4pt]
+\large Final Report}
+\author{
+  \begin{tabular}{c}
+    Student A: 2301498\\
+    Abdelhafeez Aref Abdelhafeez Almaz
+  \end{tabular}
+  \and
+  \begin{tabular}{c}
+    Student B: 2501925\\
+    Abdelrahman Eid Ashour Mohamed
+  \end{tabular}
+}
+\date{Milestone 3 --- November 1, 2026\\CSE 681 --- Digital Image Processing}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Manual instance-mask labeling is labor-intensive, motivating interactive
+segmentation tools that use a small number of human prompts. We implemented a
+local full-stack annotation application with a React/TypeScript frontend and
+FastAPI backend, using a frozen SAM 2.1 Hiera-Tiny checkpoint. The reproducible
+data workflow prepares 300 images from COCO 2017 val2017, with 979 non-crowd
+instances in 80 categories. The application supports positive and negative
+points, boxes, saving accepted masks, and computing IoU and Dice against the
+selected COCO instance. A real API smoke test on Apple MPS returned a
+$428\times640$ mask with model confidence 0.954; the first request took
+1.56 seconds including predictor initialization. However, no manual polygon
+baseline was measured and no prompted mask was scored in the available
+evaluation manifest. Thus, this work establishes a runnable annotation and
+measurement pipeline, but does not establish accuracy, time savings, or
+superiority over manual annotation under the tested local setup.
+\end{abstract}
+
+\section{Introduction}
+\label{sec:intro}
+Creating instance masks by hand requires annotators to delineate object
+boundaries, which can be costly when preparing image datasets. Interactive
+segmentation offers a different workflow: an annotator provides points or a
+box, inspects a model-generated mask, and decides whether to refine or accept
+it. This project set out to build such a workflow around SAM 2 and evaluate it
+against existing COCO instance masks and a manual polygon baseline.
+
+The deliverable is a local web application backed by Python/FastAPI and a
+React/TypeScript frontend. It provides a reproducible 300-image COCO 2017
+validation subset, target-object selection, point and box prompts, local SAM 2
+inference, accepted-mask persistence, and IoU/Dice computation. The software
+path was validated with automated tests and one real API inference on Apple
+MPS. That inference took 1.56 seconds on the first request, including model
+initialization, and returned model confidence 0.954. These are engineering and
+smoke-test observations, not comparative evaluation results. The planned
+manual polygon experiment and ground-truth-scored prompted sample were not
+completed, so the evidence does not support a claim that the tool improves
+mask quality or annotation speed.
+
+\section{Related Work}
+\label{sec:related}
+\textbf{Interactive segmentation.}
+GrabCut is a classic foreground-extraction technique in which user-supplied
+initialization guides iterative graph-cut refinement \citep{rother2004grabcut}.
+This project follows the broader human-guided segmentation idea, but uses a
+promptable pretrained model rather than a graph-cut optimization.
+
+\textbf{Promptable foundation models.}
+The Segment Anything Model introduced a large-scale promptable segmentation
+approach with point and box inputs \citep{kirillov2023sam}. SAM 2 extends this
+family to image and video segmentation \citep{ravi2024sam2}; this project uses
+its image predictor with the Hiera-Tiny checkpoint and does not train or
+fine-tune the model. FastSAM is another recent approach to segment-anything
+behavior, using a different model pipeline \citep{zhao2023fastsam}. These works
+provide context rather than directly comparable performance numbers: our
+smoke-test protocol and sample are not a benchmark reproduction.
+
+\textbf{Dataset and evaluation context.}
+COCO supplies images and instance annotations for object recognition and
+segmentation research \citep{lin2014coco}. We use its existing instance masks
+as references for post-annotation scoring. Each source image remains subject
+to its individual license and the dataset terms \citep{cocoTerms}.
+
+\section{Method}
+\label{sec:method}
+The frozen SAM 2.1 Hiera-Tiny image predictor is wrapped by a FastAPI service.
+The React/TypeScript frontend lists local COCO images and their non-crowd
+object categories, serves a selected image, and provides positive point,
+negative point, and box prompting. A segmentation request sends the image and
+prompt coordinates to the local backend. The backend validates the prompt
+against image dimensions, runs the image predictor, and returns the
+highest-scoring mask among the predictor's multimask candidates, together with
+its model confidence. The annotator can inspect the overlay and accept or
+refine it.
+
+For an accepted COCO annotation, the backend validates that the target
+annotation belongs to the selected image, checks the prediction dimensions,
+loads the corresponding exported ground-truth mask, and computes binary IoU
+and Dice. It saves the prediction mask, prompt record, per-annotation JSON
+record, elapsed time, and an evaluation CSV manifest under the local,
+Git-ignored \texttt{data/evaluation/} directory. The timer begins with the
+first prompt and ends on acceptance; model inference latency is measured
+separately. Ground truth is reserved for scoring and is not shown to guide
+prompt selection.
+
+No model training, fine-tuning, or task-specific loss function is used. The
+model parameters are those of the downloaded SAM 2.1 checkpoint; prompt
+coordinates are supplied directly by the annotator. The high-level pipeline
+is:
+
+\begin{figure}[ht]
+\centering
+\fbox{\parbox{0.94\linewidth}{\centering
+COCO image and hidden reference mask
+$\longrightarrow$ choose target object
+$\longrightarrow$ human point/box prompts
+$\longrightarrow$ local SAM 2.1 predictor
+$\longrightarrow$ review and accept mask
+$\longrightarrow$ persist mask, prompts, and elapsed time
+$\longrightarrow$ compare with reference using IoU and Dice}}
+\caption{Implemented annotation and evaluation pipeline. The ground-truth
+mask is used at the final scoring stage, not as prompt guidance.}
+\label{fig:arch}
+\end{figure}
+
+\section{Experimental Setup}
+\label{sec:setup}
+
+\subsection{Dataset}
+The data workflow selects 300 images from COCO 2017 val2017. Eligible images
+have between one and eight non-crowd instance annotations; candidates are
+sorted before selection with pseudorandom seed 42. The resulting subset
+contains 979 non-crowd annotations in 80 categories. Per-instance binary
+masks are exported for scoring. The selected image IDs are recorded in
+\texttt{docs/selected\_image\_ids.json}; download and regeneration instructions
+are in \texttt{data/README.md}. Images, annotation data, masks, and weights are
+local-only and ignored by Git. COCO source-image licensing must be checked
+before redistribution \citep{cocoTerms}.
+
+\subsection{Baseline(s)}
+The planned primary baseline is manual polygon delineation of the same target
+instances, using a non-SAM annotation interface and the same timer definition.
+The baseline experiment was not run: no manual polygon masks or timing records
+were available when this report was prepared. Consequently, this report cannot
+confirm a baseline reproduction or compare against published baseline numbers.
+The existing COCO masks are reference annotations for scoring, not a measured
+manual-tool baseline.
+
+\subsection{Metrics \& Protocol}
+For binary prediction mask $P$ and reference mask $G$, intersection over union
+and Dice are computed as
+\[
+\operatorname{IoU}(P,G)=\frac{|P\cap G|}{|P\cup G|},\qquad
+\operatorname{Dice}(P,G)=\frac{2|P\cap G|}{|P|+|G|}.
+\]
+The implementation rejects mismatched mask dimensions and associates each
+prediction with its COCO annotation ID. Annotation time is the elapsed
+wall-clock time from the first prompt until acceptance; inference latency is
+reported separately. A valid paired comparison would require the same
+preselected target instances in both workflows, with ground truth withheld
+while each mask is created. No paired sample, repeated seed, or statistical
+test was completed. Therefore, no aggregate method metrics or time-saving
+estimate can be reported.
+
+\section{Results}
+\label{sec:results}
+The primary experiment remains incomplete. The evaluation directory contained
+no accepted predictions or timing manifest when checked for this report, and
+no manual-baseline records were available. Accordingly, the two method rows
+below explicitly report missing measurements rather than treating missing
+data as a zero score.
+
+\begin{table}[ht]
+\centering
+\caption{Planned paired comparison. Neither workflow has scored observations;
+the SAM 2 smoke test below was not accepted or scored as an annotation.}
+\label{tab:main}
+\begin{tabular}{@{}lccccc@{}}
+\toprule
+\textbf{Method} & \textbf{Scored $N$} & \textbf{Mean IoU} &
+\textbf{Mean Dice} & \textbf{Annotation time} & \textbf{Runtime evidence} \\
+\midrule
+Manual polygon baseline & 0 & Not measured & Not measured &
+Not measured & Not measured \\
+SAM 2.1 prompted tool & 0 & Not measured & Not measured &
+Not measured & One smoke-test request: 1.56 s \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The one smoke test used COCO image \texttt{000000000776.jpg} (428 by 640
+pixels) and a positive point at $(130,130)$ selected by visual inspection.
+With the SAM 2.1 Hiera-Tiny checkpoint on Apple MPS, the first API request
+returned a mask with confidence 0.954 in 1.56 seconds. This request included
+predictor initialization; it is not steady-state inference latency or
+human annotation time. Confidence is not IoU or Dice. No qualitative
+success/failure comparison is reported because the mask was not part of a
+reviewed, scored annotation trial.
+
+\begin{figure}[ht]
+\centering
+\fbox{\parbox{0.90\linewidth}{\centering
+No paired qualitative examples are reported. The available single smoke-test
+mask was not reviewed and scored against its target before this report.}}
+\caption{Qualitative comparison unavailable: no verified paired manual and
+SAM 2 annotations were collected.}
+\label{fig:qual}
+\end{figure}
+
+\subsection{Ablation Studies}
+\label{sec:ablation}
+The planned prompt-type ablation would compare point prompting with box
+prompting on the same target instances, holding the checkpoint and acceptance
+protocol fixed. It was not performed, so no effect of prompt type can be
+estimated.
+
+\begin{table}[ht]
+\centering
+\caption{Prompt-type ablation status. Missing values indicate that the
+experiment was not run.}
+\label{tab:ablation}
+\begin{tabular}{@{}lccc@{}}
+\toprule
+\textbf{Prompt condition} & \textbf{Scored $N$} & \textbf{Mean IoU} &
+\textbf{Mean annotation time} \\
+\midrule
+Positive point & 0 & Not measured & Not measured \\
+Box & 0 & Not measured & Not measured \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Discussion \& Limitations}
+\label{sec:discussion}
+The completed contribution is a reproducible software and data path: the
+application can select COCO targets, accept interactive prompts, request local
+SAM 2 inference, and persist accepted masks with timing and mask metrics. The
+backend suite passed 17 tests, the frontend TypeScript production build and
+lint completed successfully, and a real one-image inference request verified
+that the downloaded checkpoint can run through the API on Apple MPS. These
+checks establish implementation behavior, not segmentation quality.
+
+The central limitation is the absence of the planned paired human study. The
+manual polygon baseline was not collected, and no accepted SAM 2 masks were
+recorded in the evaluation manifest. The single smoke test has no ground-truth
+score and cannot support an accuracy or time-saving claim. In addition, the
+sample was designed as a small reproducibility subset rather than a
+representative benchmark; no annotator study, inter-annotator analysis,
+uncertainty estimate, or per-category analysis was performed. The observed
+first-request latency includes model initialization and comes from one
+machine/device, so it should not be generalized to other hardware or
+steady-state requests.
+
+The system also depends on local model weights and COCO assets that are
+excluded from version control. Reproduction requires downloading them with the
+documented scripts, installing the optional SAM 2 dependency, and matching the
+checkpoint to its configuration. The frontend and backend automate metric
+calculation but do not by themselves ensure that annotation prompts were
+chosen without seeing ground truth; this remains a protocol requirement for
+future trials. The results are therefore an honest implementation milestone,
+not evidence that SAM 2 is faster or more accurate than manual polygon
+labeling.
+
+\section{Conclusion}
+\label{sec:conclusion}
+We built a local React/FastAPI annotation tool around frozen SAM 2.1 and a
+reproducible 300-image COCO subset, including an API path that stores masks and
+computes IoU, Dice, and annotation time. One real inference smoke test and
+automated software checks succeeded, but the paired manual baseline and scored
+prompted evaluation were not completed. No conclusion about quality or time
+savings is therefore justified; the next step is to collect blinded,
+same-instance annotations with the shared timer protocol.
+
+\section*{Individual Contributions}
+\label{sec:contributions}
+Student A was assigned COCO data preparation and the manual polygon baseline;
+the baseline measurements remain incomplete. Student B implemented the local
+React/FastAPI annotation workflow, SAM 2 integration, metric persistence, and
+evaluation tooling.
+
+\bibliographystyle{unsrtnat}
+\bibliography{references}
+
+\appendix
+\section{Additional Results}
+\label{sec:appendix}
+The reproducible software checks at report time were 17 passing backend tests,
+successful Ruff checks, a successful frontend TypeScript/Vite production
+build, and a successful frontend lint run. The real inference smoke test
+returned a 428 by 640 mask with confidence 0.954; the first API request took
+1.56 seconds on Apple MPS including predictor initialization. These are
+validation observations only and are not included as quality metrics.
+
+\end{document}
