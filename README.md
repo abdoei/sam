@@ -85,6 +85,26 @@ ground-truth masks. Read the source dataset's license and
 individual image terms before sharing any data or demo output; the dataset is not
 included in this repository.
 
+For evaluation, download each accepted mask using its COCO annotation ID and create
+`data/evaluation/predictions.csv`:
+
+```csv
+ann_id,prediction_path,elapsed_seconds
+123456,123456-sam2-mask.png,18.42
+```
+
+`elapsed_seconds` is the interactive timer from the first prompt through accepting
+the mask. Use the same start/stop definition for the manual-polygon baseline. Then,
+from `backend/`, run:
+
+```sh
+uv run python scripts/evaluate_masks.py
+```
+
+The script writes per-instance IoU and Dice along with aggregate means and any
+recorded annotation times. It rejects duplicate/unknown annotation IDs and
+dimension mismatches rather than silently skipping samples.
+
 ## Reproducibility
 
 The subset selection seed and filtering rules are explicit in the scripts. Keep
