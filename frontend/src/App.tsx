@@ -60,6 +60,7 @@ function errorMessage(detail: unknown): string {
 
 function App() {
   const [file, setFile] = useState<File | null>(null)
+  const [annotationId, setAnnotationId] = useState('')
   const [imageUrl, setImageUrl] = useState<string | null>(null)
   const [imageSize, setImageSize] = useState<ImageSize | null>(null)
   const [tool, setTool] = useState<Tool>('positive')
@@ -72,9 +73,11 @@ function App() {
   const [error, setError] = useState<string | null>(null)
   const [isRunning, setIsRunning] = useState(false)
   const [inferenceMs, setInferenceMs] = useState<number | null>(null)
+  const [annotationSeconds, setAnnotationSeconds] = useState<number | null>(null)
   const imageRef = useRef<HTMLImageElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const boxStart = useRef<{ x: number; y: number } | null>(null)
+  const annotationStart = useRef<number | null>(null)
 
   useEffect(() => {
     let active = true
@@ -196,12 +199,20 @@ function App() {
     setBox(null)
     setError(null)
     setInferenceMs(null)
+    setAnnotationSeconds(null)
+    annotationStart.current = null
+  }
+
+  function startAnnotation() {
+    if (annotationStart.current === null) annotationStart.current = performance.now()
+    setAnnotationSeconds(null)
   }
 
   function handleCanvasClick(event: MouseEvent<HTMLCanvasElement>) {
     if (tool === 'box') return
     const coordinate = imageCoordinates(event)
     if (!coordinate) return
+    startAnnotation()
     setPoints((current) => [...current, { ...coordinate, label: tool === 'positive' ? 1 : 0 }])
     setMask(null)
     setError(null)
@@ -211,6 +222,7 @@ function App() {
     if (tool !== 'box') return
     const coordinate = imageCoordinates(event)
     if (!coordinate) return
+    startAnnotation()
     boxStart.current = coordinate
     setDraftBox({ x0: coordinate.x, y0: coordinate.y, x1: coordinate.x, y1: coordinate.y })
     event.currentTarget.setPointerCapture(event.pointerId)
@@ -254,6 +266,8 @@ function App() {
     setMask(null)
     setError(null)
     setInferenceMs(null)
+    setAnnotationSeconds(null)
+    annotationStart.current = null
   }
 
   async function runSegmentation() {
@@ -292,8 +306,15 @@ function App() {
     if (!mask) return
     const link = document.createElement('a')
     link.href = `data:image/png;base64,${mask.mask_png_base64}`
-    link.download = `${file?.name.replace(/\.[^.]+$/, '') ?? 'mask'}-sam2-mask.png`
+    const name = annotationId.trim() || file?.name.replace(/\.[^.]+$/, '') || 'mask'
+    link.download = `${name}-sam2-mask.png`
     link.click()
+  }
+
+  function acceptAnnotation() {
+    if (annotationStart.current === null) return
+    setAnnotationSeconds((performance.now() - annotationStart.current) / 1000)
+    annotationStart.current = null
   }
 
   const canRun = Boolean(file && (points.length || box) && !isRunning)
@@ -442,6 +463,17 @@ function App() {
               <span><i className="legend-dot negative-dot" /> Background</span>
               <span><i className="legend-box" /> Box</span>
             </div>
+            <label className="annotation-id-field">
+              COCO annotation ID <span>(for IoU evaluation)</span>
+              <input
+                inputMode="numeric"
+                min="1"
+                onChange={(event) => setAnnotationId(event.currentTarget.value)}
+                placeholder="Optional"
+                type="number"
+                value={annotationId}
+              />
+            </label>
             {health && !health.model.ready && (
               <p className="setup-hint" role="status">
                 {!health.model.installed
@@ -467,12 +499,24 @@ function App() {
               {mask && <span className="result-tag">SAM2</span>}
             </div>
             {mask ? (
-              <div className="result-summary">
-                <p>SAM2 confidence score <strong>{mask.score.toFixed(3)}</strong></p>
-                <button className="secondary-button" onClick={downloadMask} type="button">
-                  Download PNG
-                </button>
-              </div>
+              <>
+                <div className="result-summary">
+                  <p>SAM2 confidence score <strong>{mask.score.toFixed(3)}</strong></p>
+                  {annotationSeconds === null && (
+                    <button className="secondary-button" onClick={acceptAnnotation} type="button">
+                      Accept annotation
+                    </button>
+                  )}
+                  <button className="secondary-button" onClick={downloadMask} type="button">
+                    Download PNG
+                  </button>
+                </div>
+                {annotationSeconds !== null && (
+                  <p className="runtime-note">
+                    Total annotation time: {annotationSeconds.toFixed(2)}s (from first prompt to acceptance)
+                  </p>
+                )}
+              </>
             ) : (
               <p className="empty-result">Your generated mask will appear over the image.</p>
             )}
@@ -486,7 +530,8 @@ function App() {
             <p>
               <strong>Evaluation plan</strong>
               Compare per-instance mask IoU with COCO ground truth and measure total annotation
-              time separately from inference latency.
+              time separately from inference latency. The timer starts at the first prompt and
+              stops when you accept the mask.
             </p>
           </section>
         </aside>

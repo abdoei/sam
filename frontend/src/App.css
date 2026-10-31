@@ -430,6 +430,36 @@ h2 {
   border: 1px solid #bdc7d4;
 }
 
+.annotation-id-field {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 13px;
+  color: #b6c0cd;
+  font-size: 10px;
+}
+
+.annotation-id-field span {
+  color: #798596;
+}
+
+.annotation-id-field input {
+  grid-column: 1 / -1;
+  width: 100%;
+  min-height: 34px;
+  padding: 0 9px;
+  border: 1px solid #35414d;
+  border-radius: 6px;
+  background: #141a21;
+  color: #e8edf4;
+  font-size: 11px;
+}
+
+.annotation-id-field input::placeholder {
+  color: #6f7a88;
+}
+
 .setup-hint {
   margin: 0 0 13px;
   color: #e8c783;
@@ -505,6 +535,7 @@ h2 {
 
 .result-summary {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
