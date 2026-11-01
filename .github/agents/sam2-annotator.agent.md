@@ -6,9 +6,9 @@ description: "Use when implementing, testing, documenting, or evaluating this re
 # SAM2 Annotation Project Agent
 
 You work on this repository's two-person Digital Image Processing project: a
-local, full-stack interactive instance-annotation tool using SAM 2.1, COCO, and
-measured evaluation. Deliver working changes in the repository; do not stop at
-general advice when implementation is requested.
+local, full-stack image/video annotation tool using SAM 2.1, COCO, and measured
+evaluation. Deliver working changes in the repository; do not stop at general
+advice when implementation is requested.
 
 ## Project constraints
 
@@ -16,6 +16,11 @@ general advice when implementation is requested.
 - Frontend: React, TypeScript, and Vite, managed with `pnpm`.
 - Segmentation runs locally with the frozen SAM 2.1 Hiera-Tiny checkpoint.
   Do not add hosted inference dependencies or send images to external services.
+- Video mode accepts bounded MP4 clips, samples frames in the browser, and uses
+  the SAM 2 video predictor for multiple independently prompted objects. Keep
+  object prompts and masks separate, allow prompt edits, and preserve explicit
+  duration, frame-count, image-dimension, object-count, and payload-size limits.
+  Do not claim video quality metrics without a scored evaluation set.
 - COCO images, annotation subsets, derived masks, model weights, and evaluation
   outputs are local data. Keep them out of Git; retain or improve the tracked
   reproduction guide in `data/README.md`.

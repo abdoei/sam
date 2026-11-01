@@ -1,6 +1,7 @@
 # SAM2 Interactive Annotation
 
-A small, local web application for image annotation with SAM2 point and box prompts.
+A small, local web application for multi-object image/video annotation with SAM2
+point and rectangle prompts.
 The backend is Python/FastAPI and the frontend is React, TypeScript, and Vite. Model
 inference runs locally; images and prompts are not sent to a hosted segmentation
 service.
@@ -86,12 +87,27 @@ val2017 image archive. The selected IDs are recorded in
 `docs/selected_image_ids.json`. All image, annotation, mask, and checkpoint
 artifacts are ignored by Git. Read the source image licenses before redistribution.
 
-In the web app, choose a COCO sample and target object, add prompts, generate a
-mask, and accept it to save the prediction and its annotation time. The backend
-compares it with the matching ground-truth mask and records IoU/Dice in the
-annotation record; accepted predictions and timings are stored in the ignored
-`data/evaluation/` directory. Uploaded images can be segmented and timed, but
-COCO ground-truth metrics are only available for the bundled COCO subset.
+In the web app, choose Image or Video mode. For images, select a COCO sample and
+target object or upload a local image. Add objects, add or remove point and
+rectangle prompts for each object, and generate separate masks in the object's
+display color. Accepting a COCO annotation scores the selected object's mask
+against the matching ground-truth mask and records IoU/Dice, prompt data, and
+annotation time in ignored `data/evaluation/` files. Uploaded images can be
+segmented and timed, but COCO metrics are only available for the bundled subset.
+
+Video mode accepts local MP4 files up to 100 MiB, including videos longer than
+15 seconds. For long videos, choose a 15-second segment with the segment-start
+slider and click **Apply tracking segment**. The browser samples up to 30 frames at 2
+frames per second, scaling frames to at most 1280 pixels on the long edge and
+921,600 pixels. Use the player and frame slider to add point or box prompts on
+one or more sampled frames. Add a separate tracked object for each subject;
+each object keeps its own point and rectangle prompts and mask sequence.
+Prompts can be removed or corrected before choosing **Track objects through
+video**. The app supports up to 20 objects. Each object's prompts are propagated independently in both
+directions, so tracking time increases with the number of objects. Each object's
+sampled-frame binary masks can be downloaded as PNGs. Video frames and prompts
+are sent only to the local backend; video masks are not COCO scored, and the
+video workflow currently exports masks rather than an overlay movie.
 
 The inspection and local-copy scripts are still available for an already-downloaded
 full COCO structure:

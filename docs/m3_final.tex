@@ -41,13 +41,18 @@ FastAPI backend, using a frozen SAM 2.1 Hiera-Tiny checkpoint. The reproducible
 data workflow prepares 300 images from COCO 2017 val2017, with 979 non-crowd
 instances in 80 categories. The application supports positive and negative
 points, boxes, saving accepted masks, and computing IoU and Dice against the
-selected COCO instance. A real API smoke test on Apple MPS returned a
+selected COCO instance. Image annotation supports multiple independently
+prompted objects, and an optional video workflow tracks multiple objects with
+independent prompts. A real API smoke test on Apple MPS returned a
 $428\times640$ mask with model confidence 0.954; the first request took
 1.56 seconds including predictor initialization. However, no manual polygon
 baseline was measured and no prompted mask was scored in the available
-evaluation manifest. Thus, this work establishes a runnable annotation and
-measurement pipeline, but does not establish accuracy, time savings, or
-superiority over manual annotation under the tested local setup.
+evaluation manifest. An additional video mode was smoke-tested with two
+independently propagated objects, including prompts on different frames, but
+not evaluated as an annotation experiment. Thus, this work
+establishes a runnable annotation and measurement pipeline, but does not
+establish accuracy, time savings, or superiority over manual annotation under
+the tested local setup.
 \end{abstract}
 
 \section{Introduction}
@@ -100,12 +105,26 @@ to its individual license and the dataset terms \citep{cocoTerms}.
 The frozen SAM 2.1 Hiera-Tiny image predictor is wrapped by a FastAPI service.
 The React/TypeScript frontend lists local COCO images and their non-crowd
 object categories, serves a selected image, and provides positive point,
-negative point, and box prompting. A segmentation request sends the image and
-prompt coordinates to the local backend. The backend validates the prompt
-against image dimensions, runs the image predictor, and returns the
-highest-scoring mask among the predictor's multimask candidates, together with
-its model confidence. The annotator can inspect the overlay and accept or
-refine it.
+negative point, and rectangle prompts for multiple objects. A segmentation
+request is made for each prompted object. The backend validates prompts against
+image dimensions, runs the image predictor, and returns the highest-scoring
+mask among the predictor's multimask candidates, together with its model
+confidence. The annotator can inspect color-coded masks and accept the selected
+object for COCO scoring.
+
+The application also has an optional video mode. The browser accepts MP4 files
+up to 100 MiB, including longer videos, and lets the annotator choose a segment
+of up to 15 seconds. It samples up to 30 frames at 2 frames per second and
+resizes each sampled frame to a maximum long edge of 1280 pixels and
+921,600 total pixels. Annotators can add point or box prompts on multiple
+objects and sampled frames and run SAM 2 video propagation independently in
+both directions for each object. This keeps masks and prompts separate and
+avoids coupling the objects' keyframe timing.
+The interface supports adding/removing object instances and editing each
+instance's point and rectangle prompts. Returned per-object binary masks can
+be downloaded as PNG files. This mode was
+verified with a short local smoke-test clip but was not part of a quality or
+timing experiment; its outputs are not scored against COCO.
 
 For an accepted COCO annotation, the backend validates that the target
 annotation belongs to the selected image, checks the prediction dimensions,
