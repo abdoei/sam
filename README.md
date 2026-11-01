@@ -32,7 +32,6 @@ In one terminal:
 
 ```sh
 cd backend
-# uv sync --group dev
 uv run uvicorn app.main:app --reload
 ```
 
