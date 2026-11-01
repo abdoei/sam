@@ -160,6 +160,8 @@ def segment_image(
     with prediction_lock:
         predictor = get_predictor()
         import torch
+        
+        print("DEVICE USED: ", predictor.device)
 
         with torch.inference_mode():
             predictor.set_image(np.array(image, copy=True))
@@ -174,6 +176,7 @@ def segment_image(
     mask = np.asarray(masks[best_index], dtype=np.uint8) * 255
     mask_buffer = io.BytesIO()
     Image.fromarray(mask).save(mask_buffer, format="PNG")
+    
 
     return {
         "width": width,

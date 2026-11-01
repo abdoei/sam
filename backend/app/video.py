@@ -136,6 +136,7 @@ def track_video_frames(
         with prediction_lock:
             predictor = get_video_predictor()
             import torch
+            print("DEVICE USED: ", predictor.device)
 
             with torch.inference_mode():
                 for object_id in sorted(object_ids):
