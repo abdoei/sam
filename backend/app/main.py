@@ -1,5 +1,6 @@
 import base64
 import binascii
+import json
 from pathlib import Path
 from typing import Any
 
@@ -17,8 +18,15 @@ from app.coco import (
 )
 from app.prompts import PromptPayload
 from app.segmentation import MAX_IMAGE_BYTES, model_status, segment_image
+from app.video import (
+    MAX_VIDEO_FRAME_BYTES,
+    MAX_VIDEO_FRAMES,
+    VideoKeyframePrompt,
+    track_video_frames,
+)
 
 MAX_PREDICTION_BYTES = 15 * 1024 * 1024
+MAX_VIDEO_UPLOAD_BYTES = MAX_VIDEO_FRAMES * MAX_VIDEO_FRAME_BYTES
 
 app = FastAPI(title="SAM2 Interactive Annotation API", version="0.1.0")
 
@@ -81,6 +89,48 @@ async def segment(
         raise HTTPException(status_code=413, detail="Image exceeds the 15 MiB upload limit")
 
     return await run_in_threadpool(segment_image, image_bytes, parsed_prompt)
+
+
+@app.post("/api/video/track")
+async def track_video(
+    frames: list[UploadFile] = File(...),
+    keyframes: str = Form(...),
+) -> dict[str, Any]:
+    if len(frames) > MAX_VIDEO_FRAMES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Video exceeds the {MAX_VIDEO_FRAMES}-frame sampling limit",
+        )
+    try:
+        keyframe_data = json.loads(keyframes)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=422, detail="Invalid video prompt data") from exc
+    if not isinstance(keyframe_data, list):
+        raise HTTPException(status_code=422, detail="Video prompts must be a list")
+    try:
+        parsed_keyframes = [VideoKeyframePrompt.model_validate(item) for item in keyframe_data]
+    except ValidationError as exc:
+        errors = exc.errors(include_context=False, include_url=False)
+        raise HTTPException(status_code=422, detail=errors) from exc
+
+    frame_bytes: list[bytes] = []
+    total_bytes = 0
+    for frame_index, upload in enumerate(frames):
+        data = await upload.read(MAX_VIDEO_FRAME_BYTES + 1)
+        if len(data) > MAX_VIDEO_FRAME_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Sampled frame {frame_index} exceeds the 2 MiB limit",
+            )
+        total_bytes += len(data)
+        if total_bytes > MAX_VIDEO_UPLOAD_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail="Sampled video frames exceed the upload limit",
+            )
+        frame_bytes.append(data)
+
+    return await run_in_threadpool(track_video_frames, frame_bytes, parsed_keyframes)
 
 
 @app.post("/api/annotations")

@@ -15,7 +15,7 @@ from app.prompts import PromptPayload
 DEFAULT_CONFIG = "configs/sam2.1/sam2.1_hiera_t.yaml"
 MAX_IMAGE_BYTES = 15 * 1024 * 1024
 MAX_IMAGE_PIXELS = 25_000_000
-_prediction_lock = Lock()
+prediction_lock = Lock()
 
 
 def model_status() -> dict[str, Any]:
@@ -23,8 +23,7 @@ def model_status() -> dict[str, Any]:
 
     checkpoint = os.getenv("SAM2_CHECKPOINT", "")
     installed = find_spec("sam2") is not None
-    checkpoint_exists = bool(checkpoint) and Path(
-        checkpoint).expanduser().is_file()
+    checkpoint_exists = bool(checkpoint) and Path(checkpoint).expanduser().is_file()
     return {
         "ready": installed and checkpoint_exists,
         "installed": installed,
@@ -52,6 +51,22 @@ def _load_predictor(config: str, checkpoint: str, device: str) -> Any:
     return SAM2ImagePredictor(model)
 
 
+@lru_cache(maxsize=1)
+def _load_video_predictor(config: str, checkpoint: str, device: str) -> Any:
+    try:
+        from sam2.build_sam import build_sam2_video_predictor
+    except ImportError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "SAM2 video support is unavailable. Install the optional backend "
+                "dependency with `uv sync --extra sam2`."
+            ),
+        ) from exc
+
+    return build_sam2_video_predictor(config, checkpoint, device=device)
+
+
 def get_predictor() -> Any:
     config = os.getenv("SAM2_CONFIG", DEFAULT_CONFIG)
     checkpoint_setting = os.getenv("SAM2_CHECKPOINT", "")
@@ -74,6 +89,28 @@ def get_predictor() -> Any:
     return _load_predictor(config, checkpoint, os.getenv("SAM2_DEVICE", "cpu"))
 
 
+def get_video_predictor() -> Any:
+    config = os.getenv("SAM2_CONFIG", DEFAULT_CONFIG)
+    checkpoint_setting = os.getenv("SAM2_CHECKPOINT", "")
+    if not checkpoint_setting:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "SAM2 checkpoint is not configured. Set SAM2_CHECKPOINT to the "
+                "downloaded weights file."
+            ),
+        )
+
+    checkpoint = str(Path(checkpoint_setting).expanduser())
+    if not Path(checkpoint).is_file():
+        raise HTTPException(
+            status_code=503,
+            detail=f"SAM2 checkpoint file does not exist: {checkpoint}",
+        )
+
+    return _load_video_predictor(config, checkpoint, os.getenv("SAM2_DEVICE", "cpu"))
+
+
 def segment_image(
     image_bytes: bytes,
     prompt: PromptPayload,
@@ -89,8 +126,7 @@ def segment_image(
                 )
             image = source.convert("RGB")
     except (UnidentifiedImageError, OSError) as exc:
-        raise HTTPException(
-            status_code=400, detail="Uploaded file is not a valid image") from exc
+        raise HTTPException(status_code=400, detail="Uploaded file is not a valid image") from exc
 
     width, height = image.size
     for point in prompt.points:
@@ -102,8 +138,7 @@ def segment_image(
     if prompt.box is not None:
         x0, y0, x1, y1 = prompt.box
         if x1 <= x0 or y1 <= y0:
-            raise HTTPException(
-                status_code=422, detail="Box must have positive width and height")
+            raise HTTPException(status_code=422, detail="Box must have positive width and height")
         if x1 > width or y1 > height:
             raise HTTPException(
                 status_code=422,
@@ -111,8 +146,7 @@ def segment_image(
             )
 
     point_coords = (
-        np.asarray([[point.x, point.y]
-                   for point in prompt.points], dtype=np.float32)
+        np.asarray([[point.x, point.y] for point in prompt.points], dtype=np.float32)
         if prompt.points
         else None
     )
@@ -121,10 +155,9 @@ def segment_image(
         if prompt.points
         else None
     )
-    box = np.asarray(
-        prompt.box, dtype=np.float32) if prompt.box is not None else None
+    box = np.asarray(prompt.box, dtype=np.float32) if prompt.box is not None else None
 
-    with _prediction_lock:
+    with prediction_lock:
         predictor = get_predictor()
         import torch
 
