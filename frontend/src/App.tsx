@@ -5,6 +5,7 @@ import {
   type ChangeEvent,
   type PointerEvent,
 } from "react";
+import { compositeMaskPixels } from "./maskOverlay.mjs";
 import "./App.css";
 
 type Tool = "positive" | "negative" | "box";
@@ -459,6 +460,10 @@ function App() {
     )
       .then((loadedMasks) => {
         if (!active) return;
+        const composite = context.createImageData(
+          imageSize.width,
+          imageSize.height,
+        );
         loadedMasks.forEach(({ image, color }) => {
           const source = document.createElement("canvas");
           source.width = imageSize.width;
@@ -472,18 +477,9 @@ function App() {
             imageSize.width,
             imageSize.height,
           );
-          const red = Number.parseInt(color.slice(1, 3), 16);
-          const green = Number.parseInt(color.slice(3, 5), 16);
-          const blue = Number.parseInt(color.slice(5, 7), 16);
-          for (let index = 0; index < pixels.data.length; index += 4) {
-            const foreground = pixels.data[index] > 0;
-            pixels.data[index] = red;
-            pixels.data[index + 1] = green;
-            pixels.data[index + 2] = blue;
-            pixels.data[index + 3] = foreground ? 120 : 0;
-          }
-          context.putImageData(pixels, 0, 0);
+          compositeMaskPixels(composite.data, pixels.data, color);
         });
+        context.putImageData(composite, 0, 0);
         drawPrompts();
       })
       .catch((reason: unknown) => {
