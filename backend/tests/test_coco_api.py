@@ -30,6 +30,7 @@ def create_coco_fixture(tmp_path, monkeypatch) -> bytes:
                 "image_id": 7,
                 "category_id": 3,
                 "area": 4,
+                "bbox": [1, 1, 2, 2],
                 "iscrowd": 0,
             }
         ],
@@ -66,6 +67,7 @@ def test_coco_image_listing_and_serving(tmp_path, monkeypatch) -> None:
             "category_id": 3,
             "category_name": "object",
             "area": 4,
+            "bbox": [1.0, 1.0, 2.0, 2.0],
             "label": "object #1",
             "centroid": {"x": 1.5, "y": 1.5},
         }

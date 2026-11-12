@@ -55,6 +55,20 @@ def load_subset() -> dict[str, Any]:
     return subset
 
 
+def _annotation_bbox(annotation: dict[str, Any]) -> list[float] | None:
+    """COCO bounding box as [x, y, width, height], or None when absent or invalid."""
+    bbox = annotation.get("bbox")
+    if not isinstance(bbox, (list, tuple)) or len(bbox) != 4:
+        return None
+    try:
+        x, y, width, height = (float(value) for value in bbox)
+    except (TypeError, ValueError):
+        return None
+    if width <= 0 or height <= 0:
+        return None
+    return [round(x, 2), round(y, 2), round(width, 2), round(height, 2)]
+
+
 def image_records() -> list[dict[str, Any]]:
     subset = load_subset()
     categories = {
@@ -71,6 +85,7 @@ def image_records() -> list[dict[str, Any]]:
                 "category_id": int(annotation["category_id"]),
                 "category_name": categories.get(int(annotation["category_id"]), "unknown"),
                 "area": int(annotation["area"]),
+                "bbox": _annotation_bbox(annotation),
             }
         )
 

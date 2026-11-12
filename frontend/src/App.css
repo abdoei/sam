@@ -436,6 +436,21 @@ h1 {
   object-fit: contain;
 }
 
+/* Zoomed onto a target: the layer takes the viewport's shape, clips the scaled
+   image to it, and the canvas overlays it exactly. */
+.media-layer.is-zoomed {
+  position: relative;
+  overflow: hidden;
+  max-width: 72vh;
+  max-height: 72vh;
+  margin: 0 auto;
+}
+
+.media-layer.is-zoomed .source-image {
+  margin: 0;
+  object-fit: fill;
+}
+
 .source-video {
   background: #10151b;
   pointer-events: none;

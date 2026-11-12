@@ -7,7 +7,7 @@ import {
   type PointerEvent,
 } from "react";
 import { compositeMaskPixels } from "./maskOverlay.mjs";
-import { layoutMarkers, MIN_MARKER_SCREEN_RADIUS } from "./markerLayout.mjs";
+import { zoomViewportFor } from "./targetZoom.mjs";
 import "./App.css";
 
 type Tool = "positive" | "negative" | "box";
@@ -29,6 +29,8 @@ type ImageSize = {
   width: number;
   height: number;
 };
+
+type Viewport = ImageSize & { x: number; y: number };
 
 type HealthResponse = {
   status: string;
@@ -55,6 +57,7 @@ type CocoAnnotation = {
   area: number;
   label?: string;
   centroid?: { x: number; y: number } | null;
+  bbox?: [number, number, number, number] | null;
 };
 
 type CocoImage = {
@@ -288,6 +291,7 @@ function App() {
   );
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [imageSize, setImageSize] = useState<ImageSize | null>(null);
+  const [viewport, setViewport] = useState<Viewport | null>(null);
   const [tool, setTool] = useState<Tool>("positive");
   const [draftBox, setDraftBox] = useState<BoxPrompt | null>(null);
   const [mask, setMask] = useState<SegmentResponse | null>(null);
@@ -324,31 +328,24 @@ function App() {
     () => trackedObjects.find((object) => object.id === activeTrackedObjectId),
     [trackedObjects, activeTrackedObjectId],
   );
-  // Ground-truth centroids label each target; only COCO samples have them.
-  const targetCentroids = useMemo(
-    () =>
-      mediaMode === "image" && selectedCocoImageId !== null
-        ? (cocoImages
-            .find((image) => image.id === selectedCocoImageId)
-            ?.annotations.map((annotation, index) => ({
-              index: index + 1,
-              centroid: annotation.centroid,
-              annId: annotation.id,
-              area: annotation.area,
-            }))
-            .filter(
-              (
-                entry,
-              ): entry is {
-                index: number;
-                centroid: { x: number; y: number };
-                annId: number;
-                area: number;
-              } => entry.centroid != null,
-            ) ?? [])
-        : [],
-    [cocoImages, mediaMode, selectedCocoImageId],
-  );
+
+  // Selecting a row frames that target, since ground-truth locations are never
+  // drawn on the image; an object too large to gain from zooming shows the whole
+  // image instead.
+  function focusTarget(object: TrackedObject | undefined) {
+    if (!object || mediaMode !== "image" || !imageSize) {
+      setViewport(null);
+      return;
+    }
+    if (selectedCocoImageId === null || object.annId === undefined) {
+      setViewport(null);
+      return;
+    }
+    const annotation = cocoImages
+      .find((image) => image.id === selectedCocoImageId)
+      ?.annotations.find((item) => item.id === object.annId);
+    setViewport(zoomViewportFor(annotation?.bbox ?? null, imageSize));
+  }
 
   useEffect(() => {
     let active = true;
@@ -418,9 +415,14 @@ function App() {
 
   useEffect(() => {
     if (!imageSize || !canvasRef.current) return;
-    canvasRef.current.width = imageSize.width;
-    canvasRef.current.height = imageSize.height;
-  }, [imageSize, mediaMode, videoUrl]);
+    if (viewport) {
+      canvasRef.current.width = Math.max(1, Math.round(viewport.width));
+      canvasRef.current.height = Math.max(1, Math.round(viewport.height));
+    } else {
+      canvasRef.current.width = imageSize.width;
+      canvasRef.current.height = imageSize.height;
+    }
+  }, [imageSize, mediaMode, videoUrl, viewport]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -429,7 +431,13 @@ function App() {
     if (!context) return;
 
     let active = true;
+    context.setTransform(1, 0, 0, 1, 0, 0);
     context.clearRect(0, 0, canvas.width, canvas.height);
+    // When zoomed, the buffer covers only the viewport; drawing continues in image
+    // coordinates and this translation maps them onto the smaller buffer.
+    if (viewport) {
+      context.setTransform(1, 0, 0, 1, -viewport.x, -viewport.y);
+    }
     const drawBox = (selectedBox: BoxPrompt, color: string) => {
       context.strokeStyle = color;
       context.lineWidth = Math.max(2, imageSize.width / 400);
@@ -475,57 +483,6 @@ function App() {
           drawPoints(prompt.points, object.color);
         });
         if (draftBox) drawBox(draftBox, "#fbbf24");
-      }
-
-      if (mediaMode === "image") {
-        // Numbered markers label each ground-truth target. Markers keep a legible
-        // size and are pushed clear of each other, so several small targets close
-        // together still read as separate numbers; a leader line marks the move.
-        // The canvas buffer is the image's pixel size but CSS stretches it to the
-        // panel, so markers are sized in on-screen pixels and converted back to
-        // image pixels; otherwise they shrink with the preview.
-        const displayScale =
-          canvas.getBoundingClientRect().width / imageSize.width || 1;
-        const markerRadius = Math.min(
-          imageSize.width / 12,
-          MIN_MARKER_SCREEN_RADIUS / displayScale,
-        );
-        const markerPositions = layoutMarkers(
-          targetCentroids.map(({ centroid }) => centroid),
-          markerRadius,
-          imageSize,
-        );
-        targetCentroids.forEach(({ index, annId }, markerIndex) => {
-          const { x, y, originX, originY, moved } =
-            markerPositions[markerIndex];
-
-          if (moved) {
-            context.beginPath();
-            context.moveTo(originX, originY);
-            context.lineTo(x, y);
-            context.strokeStyle = "rgba(248, 250, 252, 0.55)";
-            context.lineWidth = 1;
-            context.stroke();
-            context.beginPath();
-            context.arc(originX, originY, Math.max(1.5, markerRadius / 4), 0, Math.PI * 2);
-            context.fillStyle = "rgba(248, 250, 252, 0.75)";
-            context.fill();
-          }
-
-          context.beginPath();
-          context.arc(x, y, markerRadius, 0, Math.PI * 2);
-          context.fillStyle = "rgba(15, 23, 42, 0.88)";
-          context.fill();
-          context.strokeStyle =
-            annId === activeTarget?.annId ? "#fbbf24" : "#f8fafc";
-          context.lineWidth = annId === activeTarget?.annId ? 2 : 1.2;
-          context.stroke();
-          context.fillStyle = "#f8fafc";
-          context.font = `600 ${Math.round(markerRadius * 1.4)}px ui-sans-serif, system-ui, sans-serif`;
-          context.textAlign = "center";
-          context.textBaseline = "middle";
-          context.fillText(String(index), x, y);
-        });
       }
     };
 
@@ -576,7 +533,30 @@ function App() {
           );
           compositeMaskPixels(composite.data, pixels.data, color);
         });
-        context.putImageData(composite, 0, 0);
+        if (viewport) {
+          // putImageData ignores the canvas transform, so copy the visible region
+          // out of the full-size composite into the zoomed buffer.
+          const buffer = document.createElement("canvas");
+          buffer.width = imageSize.width;
+          buffer.height = imageSize.height;
+          buffer.getContext("2d")?.putImageData(composite, 0, 0);
+          context.setTransform(1, 0, 0, 1, 0, 0);
+          context.clearRect(0, 0, canvas.width, canvas.height);
+          context.drawImage(
+            buffer,
+            viewport.x,
+            viewport.y,
+            viewport.width,
+            viewport.height,
+            0,
+            0,
+            canvas.width,
+            canvas.height,
+          );
+          context.setTransform(1, 0, 0, 1, -viewport.x, -viewport.y);
+        } else {
+          context.putImageData(composite, 0, 0);
+        }
         drawPrompts();
       })
       .catch((reason: unknown) => {
@@ -600,29 +580,35 @@ function App() {
     imagePrompts,
     imageSize,
     mediaMode,
-    targetCentroids,
     trackedObjects,
     videoMasks,
     videoPrompts,
+    viewport,
   ]);
 
   function imageCoordinates(event: { clientX: number; clientY: number }) {
     const canvas = canvasRef.current;
     if (!canvas || !imageSize) return null;
     const bounds = canvas.getBoundingClientRect();
+    // The canvas shows either the whole image or the viewport region of it, so
+    // pointer positions scale by whichever region is visible.
+    const visibleWidth = viewport?.width ?? imageSize.width;
+    const visibleHeight = viewport?.height ?? imageSize.height;
+    const originX = viewport?.x ?? 0;
+    const originY = viewport?.y ?? 0;
     return {
       x: Math.max(
         0,
         Math.min(
           imageSize.width - 1,
-          ((event.clientX - bounds.left) * imageSize.width) / bounds.width,
+          ((event.clientX - bounds.left) * visibleWidth) / bounds.width + originX,
         ),
       ),
       y: Math.max(
         0,
         Math.min(
           imageSize.height - 1,
-          ((event.clientY - bounds.top) * imageSize.height) / bounds.height,
+          ((event.clientY - bounds.top) * visibleHeight) / bounds.height + originY,
         ),
       ),
     };
@@ -633,6 +619,7 @@ function App() {
     setFile(nextFile);
     setSelectedCocoImageId(null);
     setAnnotationId("");
+    setViewport(null);
     setImageUrl(nextFile ? URL.createObjectURL(nextFile) : null);
     setImageSize(null);
     setMask(null);
@@ -744,6 +731,7 @@ function App() {
     if (!record) return;
     setIsLoadingCocoImage(true);
     setDatasetError(null);
+    setViewport(null);
     try {
       const response = await fetch(`/api/coco/images/${imageId}`);
       if (!response.ok) {
@@ -1430,6 +1418,15 @@ function App() {
                 Video
               </button>
             </div>
+            {mediaMode === "image" && viewport && (
+              <button
+                className="small-action-button"
+                onClick={() => setViewport(null)}
+                type="button"
+              >
+                Fit image
+              </button>
+            )}
             <div className="tool-group" role="group" aria-label="Prompt tool">
               {(["positive", "negative", "box"] as const).map((nextTool) => (
                 <button
@@ -1504,7 +1501,17 @@ function App() {
             className={`image-stage ${mediaMode === "video" ? "video-stage" : ""} ${(mediaMode === "image" ? imageUrl : videoUrl) ? "has-image" : ""}`}
           >
             {mediaMode === "image" && imageUrl ? (
-              <div className="media-layer">
+              <div
+                className={`media-layer ${viewport ? "is-zoomed" : ""}`}
+                style={
+                  viewport
+                    ? {
+                        aspectRatio: `${viewport.width} / ${viewport.height}`,
+                        width: "100%",
+                      }
+                    : undefined
+                }
+              >
                 <img
                   alt="Selected image for segmentation"
                   className="source-image"
@@ -1522,6 +1529,22 @@ function App() {
                   }}
                   ref={imageRef}
                   src={imageUrl}
+                  style={
+                    viewport && imageSize
+                      ? {
+                          // Scaled up and offset inside the clipped media layer so
+                          // exactly the viewport region shows; the canvas scales
+                          // with it and keeps its one-to-one overlay.
+                          position: "absolute",
+                          left: `${(-viewport.x / viewport.width) * 100}%`,
+                          top: `${(-viewport.y / viewport.height) * 100}%`,
+                          width: `${(imageSize.width / viewport.width) * 100}%`,
+                          height: `${(imageSize.height / viewport.height) * 100}%`,
+                          maxWidth: "none",
+                          maxHeight: "none",
+                        }
+                      : undefined
+                  }
                 />
                 <canvas
                   aria-label="Click to add prompts or drag to draw a box"
@@ -1817,6 +1840,7 @@ function App() {
                         disabled={isRunning}
                         onClick={() => {
                           setActiveTrackedObjectId(object.id);
+                          focusTarget(object);
                           if (mediaMode === "image") {
                             setMask(imageMasks[object.id] ?? null);
                           }
