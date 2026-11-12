@@ -126,6 +126,9 @@ const BOX_SCREEN_WIDTH = 2;
 /** Reference ground-truth mask, drawn differently from SAM2's own masks. */
 const REFERENCE_MASK_COLOR = "#22d3ee";
 
+/** How long the reference mask stays visible after its row is selected. */
+const REFERENCE_MASK_FLASH_MS = 2000;
+
 function objectsFromAnnotations(annotations: CocoAnnotation[]): TrackedObject[] {
   return annotations.map((annotation, index) => ({
     id: index + 1,
@@ -325,6 +328,7 @@ function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const boxStart = useRef<{ x: number; y: number } | null>(null);
   const annotationStart = useRef<number | null>(null);
+  const referenceFlashTimeout = useRef<number | null>(null);
   const activeImagePrompts = imagePrompts[activeTrackedObjectId] ?? {
     points: [],
     box: null,
@@ -358,6 +362,31 @@ function App() {
       ?.annotations.find((item) => item.id === object.annId);
     setViewport(zoomViewportFor(annotation?.bbox ?? null, imageSize));
   }
+
+  // Briefly reveal the target's reference mask when its row is chosen, so the
+  // annotator can confirm which object the row refers to. The manual toggle is
+  // restored afterwards, so a flash never leaves the reference switched on.
+  function flashReferenceMask(object: TrackedObject | undefined) {
+    if (referenceFlashTimeout.current !== null) {
+      window.clearTimeout(referenceFlashTimeout.current);
+      referenceFlashTimeout.current = null;
+    }
+    if (mediaMode !== "image" || object?.annId === undefined) return;
+
+    setShowReferenceMask(true);
+    referenceFlashTimeout.current = window.setTimeout(() => {
+      setShowReferenceMask(false);
+      referenceFlashTimeout.current = null;
+    }, REFERENCE_MASK_FLASH_MS);
+  }
+
+  useEffect(() => {
+    return () => {
+      if (referenceFlashTimeout.current !== null) {
+        window.clearTimeout(referenceFlashTimeout.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -451,14 +480,11 @@ function App() {
     return referenceMasks[selectedCocoImageId]?.[annId] ?? null;
   }, [activeTarget?.annId, mediaMode, referenceMasks, selectedCocoImageId, showReferenceMask]);
 
-  // Load every ground-truth mask for the selected image when the toggle is first
-  // switched on, so the reference appears immediately as targets are compared.
+  // Load every ground-truth mask for the selected image as soon as it is chosen,
+  // so the reference appears immediately both when the toggle is switched on and
+  // during the brief flash after a row is picked.
   useEffect(() => {
-    if (
-      !showReferenceMask ||
-      mediaMode !== "image" ||
-      selectedCocoImageId === null
-    ) {
+    if (mediaMode !== "image" || selectedCocoImageId === null) {
       return;
     }
     const image = cocoImages.find((item) => item.id === selectedCocoImageId);
@@ -1524,7 +1550,15 @@ function App() {
               <button
                 aria-pressed={showReferenceMask}
                 className={`small-action-button ${showReferenceMask ? "selected" : ""}`}
-                onClick={() => setShowReferenceMask((current) => !current)}
+                onClick={() => {
+                  // An explicit toggle cancels a pending flash so its result is what
+                  // the annotator asked for, not what the flash timer had queued.
+                  if (referenceFlashTimeout.current !== null) {
+                    window.clearTimeout(referenceFlashTimeout.current);
+                    referenceFlashTimeout.current = null;
+                  }
+                  setShowReferenceMask((current) => !current);
+                }}
                 title="Show the COCO ground-truth mask for this object"
                 type="button"
               >
@@ -1945,6 +1979,7 @@ function App() {
                         onClick={() => {
                           setActiveTrackedObjectId(object.id);
                           focusTarget(object);
+                          flashReferenceMask(object);
                           if (mediaMode === "image") {
                             setMask(imageMasks[object.id] ?? null);
                           }

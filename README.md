@@ -98,7 +98,9 @@ separately selectable and each is scored against its own annotation. Each row
 carries a colour. Nothing is drawn over the image to mark the targets: selecting
 a row zooms the view onto that annotation's bounding box with a generous margin
 around it, so small objects become clickable without losing their surroundings,
-and **Fit image** returns to the whole photograph. **Show reference mask** overlays
+and **Fit image** returns to the whole photograph. Selecting a row also flashes
+that object's reference mask for two seconds, then returns the reference to off
+(unless you had it switched on). **Show reference mask** overlays
 the selected object's COCO ground-truth mask in cyan, under any SAM2 prediction, so
 a mask can be compared with what it will be scored against; it is off by default
 and resets when a new image is chosen. Ground-truth mask boundaries are never
