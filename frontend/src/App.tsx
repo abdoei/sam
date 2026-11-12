@@ -118,6 +118,11 @@ const MAX_VIDEO_DURATION_SECONDS = 15;
 const MAX_VIDEO_FILE_BYTES = 100 * 1024 * 1024;
 const MAX_VIDEO_FRAME_DIMENSION = 1280;
 
+/** Prompt markers keep these sizes in on-screen pixels, at any zoom level. */
+const POINT_SCREEN_RADIUS = 4;
+const POINT_OUTLINE_SCREEN_WIDTH = 1;
+const BOX_SCREEN_WIDTH = 2;
+
 function objectsFromAnnotations(annotations: CocoAnnotation[]): TrackedObject[] {
   return annotations.map((annotation, index) => ({
     id: index + 1,
@@ -438,9 +443,17 @@ function App() {
     if (viewport) {
       context.setTransform(1, 0, 0, 1, -viewport.x, -viewport.y);
     }
+    // Prompts are sized in on-screen pixels so they stay small and crisp at any
+    // zoom: drawing them in image pixels made them balloon and pixelate when the
+    // view was magnified. The buffer may be smaller than the image, so convert.
+    const visibleWidth = viewport?.width ?? imageSize.width;
+    const visibleHeight = viewport?.height ?? imageSize.height;
+    const pixelScale = Math.min(visibleWidth / canvas.width, visibleHeight / canvas.height) || 1;
+    const pointRadius = POINT_SCREEN_RADIUS * pixelScale;
+    const pointOutline = Math.max(1, POINT_OUTLINE_SCREEN_WIDTH * pixelScale);
     const drawBox = (selectedBox: BoxPrompt, color: string) => {
       context.strokeStyle = color;
-      context.lineWidth = Math.max(2, imageSize.width / 400);
+      context.lineWidth = Math.max(1, BOX_SCREEN_WIDTH * pixelScale);
       context.strokeRect(
         selectedBox.x0,
         selectedBox.y0,
@@ -451,16 +464,10 @@ function App() {
     const drawPoints = (promptPoints: PointPrompt[], positiveColor: string) => {
       promptPoints.forEach((point) => {
         context.beginPath();
-        context.arc(
-          point.x,
-          point.y,
-          Math.max(7, imageSize.width / 120),
-          0,
-          Math.PI * 2,
-        );
+        context.arc(point.x, point.y, pointRadius, 0, Math.PI * 2);
         context.fillStyle = point.label === 1 ? positiveColor : "#ef4444";
         context.fill();
-        context.lineWidth = Math.max(2, imageSize.width / 500);
+        context.lineWidth = pointOutline;
         context.strokeStyle = "#ffffff";
         context.stroke();
       });
