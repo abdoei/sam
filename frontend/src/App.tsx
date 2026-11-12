@@ -357,6 +357,8 @@ function App() {
   const [isLoadingCocoImage, setIsLoadingCocoImage] = useState(false);
   const [isSavingAnnotation, setIsSavingAnnotation] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
+  /** Index of the prompt point highlighted in the list; the last one added by default. */
+  const [highlightedPoint, setHighlightedPoint] = useState<number | null>(null);
   const [inferenceMs, setInferenceMs] = useState<number | null>(null);
   /** Inference time summed across every mask generation so far for the current object. */
   const [totalInferenceMs, setTotalInferenceMs] = useState(0);
@@ -606,7 +608,16 @@ function App() {
       );
     };
     const drawPoints = (promptPoints: PointPrompt[], positiveColor: string) => {
-      promptPoints.forEach((point) => {
+      promptPoints.forEach((point, index) => {
+        // The selected point gets a ring so it can be picked out among many.
+        const selected = highlightedPoint === index;
+        if (selected) {
+          context.beginPath();
+          context.arc(point.x, point.y, pointRadius + pointOutline * 3, 0, Math.PI * 2);
+          context.strokeStyle = "#fbbf24";
+          context.lineWidth = pointOutline * 2;
+          context.stroke();
+        }
         context.beginPath();
         context.arc(point.x, point.y, pointRadius, 0, Math.PI * 2);
         context.fillStyle = point.label === 1 ? positiveColor : "#ef4444";
@@ -780,6 +791,7 @@ function App() {
     outline,
     outlineParts,
     tool,
+    highlightedPoint,
   ]);
 
   function imageCoordinates(event: { clientX: number; clientY: number }) {
@@ -1040,6 +1052,8 @@ function App() {
     setMask(null);
     setSavedAnnotation(null);
     setError(null);
+    // Highlight the point just placed so the new row in the list is identifiable.
+    setHighlightedPoint(imagePrompts[activeTrackedObjectId]?.points.length ?? 0);
   }
 
   function handleBoxStart(event: PointerEvent<HTMLCanvasElement>) {
@@ -2215,6 +2229,100 @@ function App() {
                   (activeObjectPrompts.box ? 1 : 0)}
               </span>
             </div>
+            {/* The primary action sits at the top of the card: with many points the
+                list grows, and a button below it kept moving off the bottom of the
+                page exactly when it was needed. */}
+            {OUTLINE_TOOLS.has(tool) ? (
+              <div className="outline-actions">
+                <p className="helper-text">
+                  {tool === "polygon"
+                    ? `Click to place vertices (${outline?.length ?? 0} in this part), then close the shape.`
+                    : "Drag to trace one part, then start another if the object is split."}
+                  {outlineParts.length > 0 && (
+                    <strong>
+                      {" "}
+                      {outlineParts.length} part{outlineParts.length === 1 ? "" : "s"} kept.
+                    </strong>
+                  )}
+                </p>
+                <button
+                  className="primary-button"
+                  disabled={
+                    isSavingOutline ||
+                    (outlineParts.length === 0 && (outline?.length ?? 0) < 3) ||
+                    activeTarget?.annId === undefined
+                  }
+                  onClick={() => void closePolygon()}
+                  type="button"
+                >
+                  {isSavingOutline ? "Saving outline…" : "Score all parts"}
+                </button>
+                <div className="outline-secondary-actions">
+                  <button
+                    className="secondary-button"
+                    disabled={(outline?.length ?? 0) < 3}
+                    onClick={finishCurrentPart}
+                    type="button"
+                  >
+                    Add another part
+                  </button>
+                  <button
+                    className="secondary-button"
+                    disabled={outlineParts.length === 0}
+                    onClick={undoPart}
+                    type="button"
+                  >
+                    Undo last part
+                  </button>
+                  <button
+                    className="secondary-button"
+                    onClick={clearOutline}
+                    type="button"
+                  >
+                    Clear outline
+                  </button>
+                </div>
+                {outlineResult && (
+                  <p className="evaluation-metrics">
+                    Polygon condition · IoU{" "}
+                    <strong>{outlineResult.iou.toFixed(3)}</strong> · Dice{" "}
+                    <strong>{outlineResult.dice.toFixed(3)}</strong>
+                    <span>Saved to the polygon evaluation manifest.</span>
+                  </p>
+                )}
+              </div>
+            ) : (
+              <button
+                className="primary-button generate-mask-button"
+                disabled={
+                  mediaMode === "video"
+                    ? !videoFrames.length ||
+                      !Object.values(videoPrompts).some((objectPrompts) =>
+                        Object.values(objectPrompts).some(
+                          (prompt) => prompt.points.length || prompt.box,
+                        ),
+                      ) ||
+                      isRunning ||
+                      isPreparingVideo
+                    : !canRun
+                }
+                onClick={runSegmentation}
+                type="button"
+              >
+                {isRunning ? (
+                  <>
+                    <span className="spinner" />
+                    {mediaMode === "video" ? "Tracking video…" : "Running SAM2…"}
+                  </>
+                ) : mediaMode === "video" ? (
+                  Object.keys(videoMasks).length
+                    ? "Re-track video"
+                    : "Track objects through video"
+                ) : (
+                  "Generate mask"
+                )}
+              </button>
+            )}
             <p className="helper-text">
               {mediaMode === "video"
                 ? `Add prompts for ${trackedObjects.find((object) => object.id === activeTrackedObjectId)?.name ?? "this object"} at frame ${currentVideoFrame + 1}.`
@@ -2344,7 +2452,19 @@ function App() {
                 activeObjectPrompts.box) && (
                 <div className="video-prompt-list">
                   {activeObjectPrompts.points.map((point, index) => (
-                      <div className="video-prompt-row" key={`point-${index}`}>
+                      <div
+                        className={`video-prompt-row ${highlightedPoint === index ? "highlighted" : ""}`}
+                        key={`point-${index}`}
+                        onClick={() => setHighlightedPoint(index)}
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            setHighlightedPoint(index);
+                          }
+                        }}
+                      >
                         <span>
                           <i
                             className={`legend-dot ${point.label ? "positive-dot" : "negative-dot"}`}
@@ -2356,7 +2476,12 @@ function App() {
                           aria-label={`Remove ${point.label ? "object" : "background"} point ${index + 1}`}
                           className="remove-prompt-button"
                           disabled={isRunning}
-                          onClick={() => removeVideoPoint(index)}
+                          onClick={(event) => {
+                            // Stop the row's highlight handler: removing a point
+                            // should not also change which row looks selected.
+                            event.stopPropagation();
+                            removeVideoPoint(index);
+                          }}
                           type="button"
                         >
                           Remove
@@ -2425,97 +2550,6 @@ function App() {
                     ? "Set SAM2_CHECKPOINT to your downloaded model weights."
                     : "Check the configured SAM2 model and checkpoint."}
               </p>
-            )}
-            {OUTLINE_TOOLS.has(tool) ? (
-              // Outline conditions submit the drawn boundary instead of prompting
-              // SAM2, so they replace the primary action while such a tool is active.
-              <div className="outline-actions">
-                <p className="helper-text">
-                  {tool === "polygon"
-                    ? `Click to place vertices (${outline?.length ?? 0} in this part), then close the shape.`
-                    : "Drag to trace one part, then start another if the object is split."}
-                  {outlineParts.length > 0 && (
-                    <strong>
-                      {" "}
-                      {outlineParts.length} part{outlineParts.length === 1 ? "" : "s"} kept.
-                    </strong>
-                  )}
-                </p>
-                <button
-                  className="primary-button"
-                  disabled={
-                    isSavingOutline ||
-                    (outlineParts.length === 0 && (outline?.length ?? 0) < 3) ||
-                    activeTarget?.annId === undefined
-                  }
-                  onClick={() => void closePolygon()}
-                  type="button"
-                >
-                  {isSavingOutline ? "Saving outline…" : "Score all parts"}
-                </button>
-                <button
-                  className="secondary-button"
-                  disabled={(outline?.length ?? 0) < 3}
-                  onClick={finishCurrentPart}
-                  type="button"
-                >
-                  Add another part
-                </button>
-                <button
-                  className="secondary-button"
-                  disabled={outlineParts.length === 0}
-                  onClick={undoPart}
-                  type="button"
-                >
-                  Undo last part
-                </button>
-                <button
-                  className="secondary-button"
-                  onClick={clearOutline}
-                  type="button"
-                >
-                  Clear outline
-                </button>
-                {outlineResult && (
-                  <p className="evaluation-metrics">
-                    Polygon condition · IoU{" "}
-                    <strong>{outlineResult.iou.toFixed(3)}</strong> · Dice{" "}
-                    <strong>{outlineResult.dice.toFixed(3)}</strong>
-                    <span>Saved to the polygon evaluation manifest.</span>
-                  </p>
-                )}
-              </div>
-            ) : (
-            <button
-              className="primary-button"
-              disabled={
-                mediaMode === "video"
-                  ? !videoFrames.length ||
-                    !Object.values(videoPrompts).some((objectPrompts) =>
-                      Object.values(objectPrompts).some(
-                        (prompt) => prompt.points.length || prompt.box,
-                      ),
-                    ) ||
-                    isRunning ||
-                    isPreparingVideo
-                  : !canRun
-              }
-              onClick={runSegmentation}
-              type="button"
-            >
-              {isRunning ? (
-                <>
-                  <span className="spinner" />
-                  {mediaMode === "video" ? "Tracking video…" : "Running SAM2…"}
-                </>
-              ) : (
-                mediaMode === "video"
-                  ? Object.keys(videoMasks).length
-                    ? "Re-track video"
-                    : "Track objects through video"
-                  : "Generate mask"
-              )}
-            </button>
             )}
             {error && (
               <p className="error-message" role="alert">
