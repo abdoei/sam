@@ -46,6 +46,10 @@ class SaveAnnotationPayload(BaseModel):
     image_id: int = Field(gt=0)
     annotation_id: int = Field(gt=0)
     elapsed_seconds: float = Field(ge=0)
+    # Total model time across every generation trial for this object, and how many
+    # trials were run. Zero means the mask was produced without timing data.
+    inference_seconds: float = Field(default=0.0, ge=0)
+    inference_runs: int = Field(default=0, ge=0)
     mask_png_base64: str = Field(min_length=1, max_length=20 * 1024 * 1024)
     prompt: PromptPayload
 
@@ -217,6 +221,9 @@ async def save_annotation(payload: SaveAnnotationPayload) -> dict[str, Any]:
             payload.elapsed_seconds,
             encoded_mask,
             payload.prompt,
+            "sam2",
+            payload.inference_seconds,
+            payload.inference_runs,
         )
     except KeyError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

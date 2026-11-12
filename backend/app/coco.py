@@ -204,7 +204,14 @@ def _write_prediction_manifest(rows: list[dict[str, Any]], path: Path) -> None:
         temporary_path = Path(temporary_file.name)
         writer = csv.DictWriter(
             temporary_file,
-            fieldnames=["ann_id", "prediction_path", "elapsed_seconds"],
+            fieldnames=[
+                "ann_id",
+                "prediction_path",
+                "elapsed_seconds",
+                "inference_seconds",
+                "inference_runs",
+            ],
+            extrasaction="ignore",
         )
         writer.writeheader()
         writer.writerows(rows)
@@ -218,6 +225,8 @@ def save_and_evaluate_annotation(
     mask_png: bytes,
     prompt: PromptPayload | dict[str, Any] | None,
     method: str = "sam2",
+    inference_seconds: float = 0.0,
+    inference_runs: int = 0,
 ) -> dict[str, Any]:
     """Score a mask against its ground truth and record it.
 
@@ -225,6 +234,10 @@ def save_and_evaluate_annotation(
     polygon baseline are written to separate manifests and can never overwrite or
     be averaged with one another. `prompt` is the SAM2 prompt that produced the
     mask; the polygon condition has no prompt, so it passes the outline instead.
+
+    `inference_seconds` is the total model time spent on this object across every
+    generation trial, not just the final one: reaching an acceptable mask usually
+    takes several attempts, and reporting only the last would understate the cost.
     """
     if method not in EVALUATION_METHODS:
         raise ValueError(
@@ -280,6 +293,8 @@ def save_and_evaluate_annotation(
         "category_id": int(target_annotation["category_id"]),
         "method": method,
         "elapsed_seconds": elapsed_seconds,
+        "inference_seconds": inference_seconds,
+        "inference_runs": inference_runs,
         **metrics,
         "prediction_path": prediction_path.relative_to(method_dir).as_posix(),
         "prompts": prompt.model_dump() if isinstance(prompt, PromptPayload) else prompt,
@@ -301,6 +316,8 @@ def save_and_evaluate_annotation(
                 "ann_id": annotation_id,
                 "prediction_path": f"predictions/{annotation_id}.png",
                 "elapsed_seconds": elapsed_seconds,
+                "inference_seconds": inference_seconds,
+                "inference_runs": inference_runs,
             }
         )
         existing.sort(key=lambda row: int(row["ann_id"]))

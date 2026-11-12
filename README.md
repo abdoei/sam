@@ -109,7 +109,11 @@ rows stay blank. Uploaded images keep the free-form object flow, and add or
 remove point and rectangle prompts for each object, then generate separate masks
 in the object's display colour. Accepting a COCO annotation scores the selected
 object's mask against the matching ground-truth mask and records IoU/Dice, prompt
-data, and annotation time in ignored `data/evaluation/` files. Uploaded images
+data, and annotation time in ignored `data/evaluation/` files. Reaching an
+acceptable mask usually takes several generation trials, so the result panel
+reports the **total model time across all trials** for that object (with the trial
+count and mean), and `inference_seconds` / `inference_runs` are stored in both the
+record and `predictions.csv`. Uploaded images
 can be segmented and timed, but COCO metrics are only available for the bundled
 subset.
 

@@ -101,10 +101,55 @@ def test_save_annotation_computes_metrics_and_writes_manifest(tmp_path, monkeypa
             "ann_id": "12",
             "prediction_path": "predictions/12.png",
             "elapsed_seconds": "18.5",
+            "inference_seconds": "0.0",
+            "inference_runs": "0",
         }
     ]
     assert (tmp_path / "evaluation/records/12.json").is_file()
     assert (tmp_path / "evaluation/predictions/12.png").is_file()
+
+
+def test_total_inference_time_is_stored_in_the_manifest(tmp_path, monkeypatch) -> None:
+    mask_png = create_coco_fixture(tmp_path, monkeypatch)
+    payload = {
+        "image_id": 7,
+        "annotation_id": 12,
+        "elapsed_seconds": 42.0,
+        # Three generation trials were needed; the stored cost is their sum.
+        "inference_seconds": 6.75,
+        "inference_runs": 3,
+        "mask_png_base64": base64.b64encode(mask_png).decode("ascii"),
+        "prompt": {"points": [{"x": 1, "y": 1, "label": 1}]},
+    }
+
+    response = client.post("/api/annotations", json=payload)
+
+    assert response.status_code == 200
+    assert response.json()["inference_seconds"] == 6.75
+    assert response.json()["inference_runs"] == 3
+
+    with (tmp_path / "evaluation/predictions.csv").open(newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    assert rows[0]["inference_seconds"] == "6.75"
+    assert rows[0]["inference_runs"] == "3"
+
+    record = json.loads((tmp_path / "evaluation/records/12.json").read_text())
+    assert record["inference_seconds"] == 6.75
+    assert record["inference_runs"] == 3
+
+
+def test_inference_seconds_cannot_be_negative(tmp_path, monkeypatch) -> None:
+    mask_png = create_coco_fixture(tmp_path, monkeypatch)
+    payload = {
+        "image_id": 7,
+        "annotation_id": 12,
+        "elapsed_seconds": 10.0,
+        "inference_seconds": -1.0,
+        "mask_png_base64": base64.b64encode(mask_png).decode("ascii"),
+        "prompt": {"points": [{"x": 1, "y": 1, "label": 1}]},
+    }
+
+    assert client.post("/api/annotations", json=payload).status_code == 422
 
 
 def test_annotations_of_one_category_get_distinct_labels_and_centroids(

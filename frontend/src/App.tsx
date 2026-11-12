@@ -340,6 +340,9 @@ function App() {
   const [isSavingAnnotation, setIsSavingAnnotation] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
   const [inferenceMs, setInferenceMs] = useState<number | null>(null);
+  /** Inference time summed across every mask generation so far for the current object. */
+  const [totalInferenceMs, setTotalInferenceMs] = useState(0);
+  const [inferenceRuns, setInferenceRuns] = useState(0);
   const [annotationSeconds, setAnnotationSeconds] = useState<number | null>(
     null,
   );
@@ -808,6 +811,8 @@ function App() {
     boxStart.current = null;
     setError(null);
     setInferenceMs(null);
+    setTotalInferenceMs(0);
+    setInferenceRuns(0);
     setAnnotationSeconds(null);
     setSavedAnnotation(null);
     annotationStart.current = null;
@@ -845,6 +850,8 @@ function App() {
     setError(null);
     setAnnotationSeconds(null);
     setInferenceMs(null);
+    setTotalInferenceMs(0);
+    setInferenceRuns(0);
     annotationStart.current = null;
     const nextUrl = URL.createObjectURL(nextFile);
     setVideoUrl(nextUrl);
@@ -888,6 +895,8 @@ function App() {
       setCurrentVideoFrame(0);
       setAnnotationSeconds(null);
       setInferenceMs(null);
+    setTotalInferenceMs(0);
+    setInferenceRuns(0);
       annotationStart.current = null;
       if (canvasRef.current) {
         canvasRef.current.width = sampled.width;
@@ -937,6 +946,8 @@ function App() {
       setMask(null);
       setError(null);
       setInferenceMs(null);
+    setTotalInferenceMs(0);
+    setInferenceRuns(0);
       setAnnotationSeconds(null);
       setSavedAnnotation(null);
       annotationStart.current = null;
@@ -1372,6 +1383,8 @@ function App() {
       setVideoMasks({});
       setError(null);
       setInferenceMs(null);
+      setTotalInferenceMs(0);
+      setInferenceRuns(0);
       setAnnotationSeconds(null);
       annotationStart.current = null;
       return;
@@ -1389,6 +1402,8 @@ function App() {
     setMask(null);
     setError(null);
     setInferenceMs(null);
+    setTotalInferenceMs(0);
+    setInferenceRuns(0);
     setAnnotationSeconds(null);
     setSavedAnnotation(null);
     annotationStart.current = null;
@@ -1445,7 +1460,12 @@ function App() {
       >;
       setImageMasks(masksByObject);
       setMask(masksByObject[activeTrackedObjectId] ?? null);
-      setInferenceMs(monotonicNow() - started);
+      const elapsed = monotonicNow() - started;
+      setInferenceMs(elapsed);
+      // Accumulate: finding a good mask takes several trials, and the reported cost
+      // must be the total model time spent, not just the last run.
+      setTotalInferenceMs((current) => current + elapsed);
+      setInferenceRuns((current) => current + 1);
     } catch (reason: unknown) {
       setError(reason instanceof Error ? reason.message : String(reason));
     } finally {
@@ -1558,6 +1578,10 @@ function App() {
             image_id: selectedCocoImageId,
             annotation_id: targetAnnotationId,
             elapsed_seconds: elapsedSeconds,
+            // Total model time across every generation trial for this object, so the
+            // stored cost reflects the trials needed to reach an acceptable mask.
+            inference_seconds: totalInferenceMs / 1000,
+            inference_runs: inferenceRuns,
             mask_png_base64: mask?.mask_png_base64,
             prompt: {
               points: prompts.points,
@@ -2538,8 +2562,19 @@ function App() {
             )}
             {inferenceMs !== null && (
               <p className="runtime-note">
-                Inference: {(inferenceMs / 1000).toFixed(2)}s (not total
-                annotation time)
+                Inference: <strong>{(totalInferenceMs / 1000).toFixed(2)}s total</strong>
+                {inferenceRuns > 1 && (
+                  <>
+                    {" "}
+                    across {inferenceRuns} generation trials (last{" "}
+                    {(inferenceMs / 1000).toFixed(2)}s, mean{" "}
+                    {(totalInferenceMs / 1000 / inferenceRuns).toFixed(2)}s)
+                  </>
+                )}
+                {inferenceRuns === 1 && (
+                  <> ({inferenceRuns} generation trial)</>
+                )}{" "}
+                — not total annotation time
               </p>
             )}
           </section>
