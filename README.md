@@ -173,6 +173,34 @@ Records whose image is no longer in the subset are skipped and listed in the
 manifest's `skipped_records` rather than failing the export or being exported as a
 reference to an image the recipient does not have.
 
+## Merging results and generating charts
+
+```sh
+cd backend
+uv run python -m scripts.report                              # live evaluation directories
+uv run python -m scripts.report ~/mate-run.zip               # a teammate's export
+uv run python -m scripts.report data/evaluation ~/mate-run.zip --out dist/report
+```
+
+Sources can be evaluation directories, exported `.zip` archives or metrics `.csv`
+files, and any number can be merged. It writes to `data/reports/`:
+
+| Output | Contents |
+| --- | --- |
+| `quality_distribution.png` / `.svg` | IoU and Dice box plots per condition |
+| `time_distribution.png` / `.svg` | Annotation time box plots |
+| `time_vs_quality.png` / `.svg` | Per-object time against IoU |
+| `per_category.png` / `.svg` | Mean IoU per COCO category |
+| `paired_comparison.png` / `.svg` | Mean IoU on annotations both conditions covered |
+| `summary.md` / `summary.json` | Written findings, including the paired time saving |
+| `results.csv` | Every merged record, one row each |
+
+Pairs of records for the same annotation and condition that disagree are an error
+rather than being averaged: identical measurements collapse (the same run exported
+twice), but two different IoUs for one annotation means the sources are
+incomparable and must be reported separately. The paired comparison is only
+produced when both conditions annotated the same annotations.
+
 Video mode accepts local MP4 files up to 100 MiB, including videos longer than
 15 seconds. For long videos, choose a 15-second segment with the segment-start
 slider and click **Apply tracking segment**. The browser samples up to 30 frames at 2

@@ -20,6 +20,7 @@ sam2 = [
 [dependency-groups]
 dev = [
     "httpx>=0.27,<1",
+    "matplotlib>=3.11.2",
     "pytest>=8,<9",
     "ruff>=0.9,<1",
 ]
