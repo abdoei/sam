@@ -95,8 +95,11 @@ separately selectable and each is scored against its own annotation. Each row
 carries a colour. Nothing is drawn over the image to mark the targets: selecting
 a row zooms the view onto that annotation's bounding box with a generous margin
 around it, so small objects become clickable without losing their surroundings,
-and **Fit image** returns to the whole photograph. Ground-truth mask boundaries
-are never drawn. After a mask is accepted, that row shows its IoU and untouched
+and **Fit image** returns to the whole photograph. **Show reference mask** overlays
+the selected object's COCO ground-truth mask in cyan, under any SAM2 prediction, so
+a mask can be compared with what it will be scored against; it is off by default
+and resets when a new image is chosen. Ground-truth mask boundaries are never
+drawn otherwise. After a mask is accepted, that row shows its IoU and untouched
 rows stay blank. Uploaded images keep the free-form object flow, and add or
 remove point and rectangle prompts for each object, then generate separate masks
 in the object's display colour. Accepting a COCO annotation scores the selected

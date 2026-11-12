@@ -123,6 +123,9 @@ const POINT_SCREEN_RADIUS = 4;
 const POINT_OUTLINE_SCREEN_WIDTH = 1;
 const BOX_SCREEN_WIDTH = 2;
 
+/** Reference ground-truth mask, drawn differently from SAM2's own masks. */
+const REFERENCE_MASK_COLOR = "#22d3ee";
+
 function objectsFromAnnotations(annotations: CocoAnnotation[]): TrackedObject[] {
   return annotations.map((annotation, index) => ({
     id: index + 1,
@@ -297,6 +300,10 @@ function App() {
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [imageSize, setImageSize] = useState<ImageSize | null>(null);
   const [viewport, setViewport] = useState<Viewport | null>(null);
+  const [showReferenceMask, setShowReferenceMask] = useState(false);
+  const [referenceMasks, setReferenceMasks] = useState<
+    Record<number, Record<number, string>>
+  >({});
   const [tool, setTool] = useState<Tool>("positive");
   const [draftBox, setDraftBox] = useState<BoxPrompt | null>(null);
   const [mask, setMask] = useState<SegmentResponse | null>(null);
@@ -429,6 +436,76 @@ function App() {
     }
   }, [imageSize, mediaMode, videoUrl, viewport]);
 
+  // The reference mask only applies to the currently selected COCO target; derive
+  // that rather than remembering to clear it whenever the selection changes.
+  const referenceMaskBase64 = useMemo(() => {
+    const annId = activeTarget?.annId;
+    if (
+      !showReferenceMask ||
+      mediaMode !== "image" ||
+      selectedCocoImageId === null ||
+      annId === undefined
+    ) {
+      return null;
+    }
+    return referenceMasks[selectedCocoImageId]?.[annId] ?? null;
+  }, [activeTarget?.annId, mediaMode, referenceMasks, selectedCocoImageId, showReferenceMask]);
+
+  // Load every ground-truth mask for the selected image when the toggle is first
+  // switched on, so the reference appears immediately as targets are compared.
+  useEffect(() => {
+    if (
+      !showReferenceMask ||
+      mediaMode !== "image" ||
+      selectedCocoImageId === null
+    ) {
+      return;
+    }
+    const image = cocoImages.find((item) => item.id === selectedCocoImageId);
+    if (!image) return;
+    const missing = image.annotations.filter(
+      (annotation) => !referenceMasks[selectedCocoImageId]?.[annotation.id],
+    );
+    if (!missing.length) return;
+
+    let active = true;
+    void Promise.all(
+      missing.map(async (annotation) => {
+        try {
+          const response = await fetch(
+            `/api/coco/images/${selectedCocoImageId}/masks/${annotation.id}`,
+          );
+          if (!response.ok) return null;
+          const buffer = await response.arrayBuffer();
+          let binary = "";
+          const bytes = new Uint8Array(buffer);
+          for (let index = 0; index < bytes.length; index += 1) {
+            binary += String.fromCharCode(bytes[index]);
+          }
+          return [annotation.id, btoa(binary)] as const;
+        } catch {
+          return null;
+        }
+      }),
+    ).then((loaded) => {
+      if (!active) return;
+      const usable = loaded.filter(
+        (entry): entry is readonly [number, string] => entry !== null,
+      );
+      if (!usable.length) return;
+      setReferenceMasks((current) => ({
+        ...current,
+        [selectedCocoImageId]: {
+          ...current[selectedCocoImageId],
+          ...Object.fromEntries(usable),
+        },
+      }));
+    });
+    return () => {
+      active = false;
+    };
+  }, [cocoImages, mediaMode, referenceMasks, selectedCocoImageId, showReferenceMask]);
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !imageSize) return;
@@ -505,6 +582,12 @@ function App() {
               ? [{ encoded: result.mask_png_base64, color: object.color }]
               : [];
           });
+
+    // The reference mask draws beneath the predicted ones so a comparison is
+    // possible without the prediction hiding what it is scored against.
+    if (showReferenceMask && referenceMaskBase64) {
+      masks.unshift({ encoded: referenceMaskBase64, color: REFERENCE_MASK_COLOR });
+    }
 
     void Promise.all(
       masks.map(
@@ -591,6 +674,8 @@ function App() {
     videoMasks,
     videoPrompts,
     viewport,
+    referenceMaskBase64,
+    showReferenceMask,
   ]);
 
   function imageCoordinates(event: { clientX: number; clientY: number }) {
@@ -739,6 +824,7 @@ function App() {
     setIsLoadingCocoImage(true);
     setDatasetError(null);
     setViewport(null);
+    setShowReferenceMask(false);
     try {
       const response = await fetch(`/api/coco/images/${imageId}`);
       if (!response.ok) {
@@ -1432,6 +1518,17 @@ function App() {
                 type="button"
               >
                 Fit image
+              </button>
+            )}
+            {mediaMode === "image" && selectedCocoImageId !== null && (
+              <button
+                aria-pressed={showReferenceMask}
+                className={`small-action-button ${showReferenceMask ? "selected" : ""}`}
+                onClick={() => setShowReferenceMask((current) => !current)}
+                title="Show the COCO ground-truth mask for this object"
+                type="button"
+              >
+                {showReferenceMask ? "Hide reference mask" : "Show reference mask"}
               </button>
             )}
             <div className="tool-group" role="group" aria-label="Prompt tool">

@@ -176,6 +176,47 @@ def test_annotation_without_ground_truth_mask_has_no_centroid(tmp_path, monkeypa
     assert annotation["centroid"] is None
 
 
+def test_ground_truth_mask_is_served_for_its_annotation(tmp_path, monkeypatch) -> None:
+    create_coco_fixture(tmp_path, monkeypatch)
+
+    response = client.get("/api/coco/images/7/masks/12")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
+    assert response.content.startswith(b"\x89PNG")
+
+
+def test_ground_truth_mask_rejects_image_annotation_mismatch(tmp_path, monkeypatch) -> None:
+    create_coco_fixture(tmp_path, monkeypatch)
+
+    # Annotation 12 belongs to image 7, so there is no mask at this path.
+    response = client.get("/api/coco/images/8/masks/12")
+
+    assert response.status_code == 404
+
+
+def test_ground_truth_mask_reports_missing_mask(tmp_path, monkeypatch) -> None:
+    subset_dir = tmp_path / "coco_subset"
+    annotations_dir = subset_dir / "annotations"
+    annotations_dir.mkdir(parents=True)
+    subset = {
+        "images": [{"id": 4, "file_name": "x.jpg", "width": 4, "height": 4}],
+        "annotations": [
+            {"id": 55, "image_id": 4, "category_id": 1, "area": 4, "iscrowd": 0},
+        ],
+        "categories": [{"id": 1, "name": "person"}],
+    }
+    (annotations_dir / "subset.json").write_text(json.dumps(subset), encoding="utf-8")
+    monkeypatch.setenv("COCO_SUBSET_JSON", str(annotations_dir / "subset.json"))
+    monkeypatch.setenv("COCO_GT_DIR", str(tmp_path / "gt_masks"))
+    monkeypatch.setenv("COCO_EVALUATION_DIR", str(tmp_path / "evaluation"))
+
+    response = client.get("/api/coco/images/4/masks/55")
+
+    assert response.status_code == 404
+    assert "export_gt_masks" in response.json()["detail"]
+
+
 def test_save_annotation_rejects_annotation_for_another_image(tmp_path, monkeypatch) -> None:
     mask_png = create_coco_fixture(tmp_path, monkeypatch)
     payload = {

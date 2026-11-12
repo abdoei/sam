@@ -12,6 +12,7 @@ from starlette.concurrency import run_in_threadpool
 from app.coco import (
     find_annotation,
     find_image,
+    ground_truth_dir,
     image_path,
     image_records,
     save_and_evaluate_annotation,
@@ -71,6 +72,28 @@ def coco_image(image_id: int) -> FileResponse:
             detail=f"COCO image {image_id} is missing from the local subset",
         )
     return FileResponse(path, media_type="image/jpeg")
+
+
+@app.get("/api/coco/images/{image_id}/masks/{annotation_id}")
+def coco_ground_truth_mask(image_id: int, annotation_id: int) -> FileResponse:
+    """Serve one annotation's ground-truth mask as a PNG overlay reference."""
+    try:
+        find_image(image_id)
+        find_annotation(annotation_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    path = ground_truth_dir() / str(image_id) / f"{annotation_id}.png"
+    if not path.is_file():
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"Ground-truth mask for annotation {annotation_id} is missing. "
+                "Run `uv run python -m scripts.export_gt_masks` from backend/."
+            ),
+        )
+    return FileResponse(path, media_type="image/png")
 
 
 @app.post("/api/segment")
