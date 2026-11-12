@@ -119,9 +119,15 @@ The project compares SAM2 prompting against a manual outline baseline. The tool
 switcher adds two outline tools beside the SAM2 prompts:
 
 - **Click vertices** places a polygon vertex per click; click near the first vertex
-  (or press the button) to close and score it.
+  to close that part.
 - **Trace outline** records an outline while dragging, simplified server-side to
   keep the stored shape faithful without storing every sample.
+
+An object can be split into several visible pieces — a pill behind a television, a
+person behind a pole. Each piece is a separate **part**: finish one with **Add
+another part** and draw the next, and the prediction is the union of every part,
+which is how COCO stores such instances. **Undo last part** removes the most
+recent one, and **Score all parts** submits them together.
 
 Both score against the selected object's COCO ground truth with the same IoU and
 Dice comparison as SAM2, and use the same per-object timer (first press to

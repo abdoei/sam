@@ -4,14 +4,20 @@ The polygon baseline is scored with the same IoU/Dice comparison as the SAM2
 condition, so its geometry is converted to a mask here rather than in the browser:
 the frontend sends the outline it drew and the backend decides which pixels that
 outline covers.
+
+An object can be split into several visible pieces — a pill behind a television,
+a person behind a pole. Each piece is its own ring, and the prediction is the
+union of them, which is how COCO itself stores such instances.
 """
 
+from io import BytesIO
 from typing import Any
 
 import numpy as np
 from PIL import Image, ImageDraw
 
 MAX_POLYGON_POINTS = 20_000
+MAX_POLYGON_PARTS = 50
 
 
 def validate_polygon(
@@ -60,14 +66,72 @@ def rasterize_polygon(
     width: int,
     height: int,
 ) -> np.ndarray:
-    """Fill a polygon into a boolean mask of the given size."""
-    cleaned = validate_polygon(points, width, height)
-    if polygon_area(cleaned) <= 0:
-        raise ValueError("Polygon has zero area; draw a shape enclosing some pixels")
+    """Fill a single polygon into a boolean mask of the given size."""
+    return rasterize_parts(
+        [[[float(x), float(y)] for x, y in points]], width, height
+    )
 
+
+def validate_parts(
+    parts: list[list[list[float]]],
+    width: int,
+    height: int,
+) -> list[list[tuple[float, float]]]:
+    """Validate every ring of a multi-part annotation.
+
+    Parts are validated individually so the error names the offending ring, but
+    a single ring still has to be usable on its own: a two-point part cannot be
+    filled, and silently dropping it would shrink the scored mask without saying so.
+    """
+    if not isinstance(parts, list) or not parts:
+        raise ValueError("A polygon annotation needs at least one part")
+    if len(parts) > MAX_POLYGON_PARTS:
+        raise ValueError(f"Annotation exceeds the {MAX_POLYGON_PARTS}-part limit")
+
+    cleaned: list[list[tuple[float, float]]] = []
+    for index, part in enumerate(parts):
+        try:
+            ring = validate_polygon(part, width, height)
+        except ValueError as exc:
+            raise ValueError(f"Part {index + 1}: {exc}") from exc
+        if polygon_area(ring) <= 0:
+            raise ValueError(
+                f"Part {index + 1} has zero area; draw a shape enclosing some pixels"
+            )
+        cleaned.append(ring)
+    return cleaned
+
+
+def rasterize_parts(
+    parts: list[list[list[float]]],
+    width: int,
+    height: int,
+) -> np.ndarray:
+    """Fill several rings into one mask, OR-ing them together.
+
+    Disconnected pieces of the same object add up, which is what lets an
+    annotation describe something partly hidden behind another object.
+    """
+    cleaned = validate_parts(
+        [[[float(x), float(y)] for x, y in part] for part in parts], width, height
+    )
     canvas = Image.new("L", (width, height), 0)
-    ImageDraw.Draw(canvas).polygon(cleaned, fill=255, outline=255)
+    draw = ImageDraw.Draw(canvas)
+    for ring in cleaned:
+        draw.polygon(ring, fill=255, outline=255)
     return np.asarray(canvas, dtype=np.uint8) > 0
+
+
+def parts_mask_png(
+    parts: list[list[list[float]]],
+    width: int,
+    height: int,
+) -> bytes:
+    """Encode a multi-part annotation's union mask as an 8-bit PNG."""
+    mask = rasterize_parts(parts, width, height)
+    buffer = BytesIO()
+    Image.fromarray(mask.astype(np.uint8) * 255, mode="L").save(buffer, format="PNG")
+    return buffer.getvalue()
 
 
 def polygon_mask_png(
@@ -75,13 +139,8 @@ def polygon_mask_png(
     width: int,
     height: int,
 ) -> bytes:
-    """Encode the polygon's mask as an 8-bit PNG, matching SAM2's mask format."""
-    mask = rasterize_polygon(points, width, height)
-    from io import BytesIO
-
-    buffer = BytesIO()
-    Image.fromarray(mask.astype(np.uint8) * 255, mode="L").save(buffer, format="PNG")
-    return buffer.getvalue()
+    """Encode a single polygon's mask as an 8-bit PNG, matching SAM2's format."""
+    return parts_mask_png([[[float(x), float(y)] for x, y in points]], width, height)
 
 
 def simplify_polyline(
@@ -125,11 +184,13 @@ def simplify_polyline(
     return [coords[index] for index in sorted(keep)]
 
 
-def polygon_summary(points: list[tuple[float, float]]) -> dict[str, Any]:
-    xs = [x for x, _ in points]
-    ys = [y for _, y in points]
+def polygon_summary(rings: list[list[tuple[float, float]]]) -> dict[str, Any]:
+    """Summary of a multi-part annotation, describing the union of its rings."""
+    xs = [x for ring in rings for x, _ in ring]
+    ys = [y for ring in rings for _, y in ring]
     return {
-        "vertex_count": len(points),
-        "area": round(polygon_area(points), 2),
+        "part_count": len(rings),
+        "vertex_count": sum(len(ring) for ring in rings),
+        "area": round(sum(polygon_area(ring) for ring in rings), 2),
         "bbox": [min(xs), min(ys), max(xs), max(ys)],
     }

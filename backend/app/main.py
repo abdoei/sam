@@ -6,7 +6,7 @@ from typing import Any, Literal
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from starlette.concurrency import run_in_threadpool
 
 from app.coco import (
@@ -18,8 +18,7 @@ from app.coco import (
     save_and_evaluate_annotation,
 )
 from app.polygon import (
-    MAX_POLYGON_POINTS,
-    polygon_mask_png,
+    parts_mask_png,
     polygon_summary,
     simplify_polyline,
     validate_polygon,
@@ -52,15 +51,32 @@ class SaveAnnotationPayload(BaseModel):
 
 
 class SavePolygonPayload(BaseModel):
-    """A polygon or freehand outline submitted as the manual baseline."""
+    """A polygon or freehand annotation submitted as the manual baseline.
+
+    `parts` holds one ring per visible piece of the object, so something split by
+    an occluder is described completely and scored as the union of its pieces.
+    `points` is still accepted as shorthand for a single ring.
+    """
 
     model_config = ConfigDict(allow_inf_nan=False)
 
     image_id: int = Field(gt=0)
     annotation_id: int = Field(gt=0)
     elapsed_seconds: float = Field(ge=0)
-    points: list[list[float]] = Field(min_length=3, max_length=MAX_POLYGON_POINTS)
+    parts: list[list[list[float]]] = Field(default_factory=list)
+    points: list[list[float]] = Field(default_factory=list)
     mode: Literal["polygon", "freehand"] = "polygon"
+
+    @model_validator(mode="after")
+    def require_rings(self) -> "SavePolygonPayload":
+        if not self.parts and not self.points:
+            raise ValueError("Provide at least one part or a points ring")
+        if self.parts and self.points:
+            raise ValueError("Provide either parts or points, not both")
+        return self
+
+    def rings(self) -> list[list[list[float]]]:
+        return self.parts if self.parts else [self.points]
 
 
 @app.get("/api/health")
@@ -227,29 +243,30 @@ async def save_polygon_annotation(payload: SavePolygonPayload) -> dict[str, Any]
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     width, height = int(image["width"]), int(image["height"])
+    rings = payload.rings()
     try:
-        points = validate_polygon(payload.points, width, height)
+        # Each ring is validated on its own, and a freehand ring is simplified
+        # separately: simplifying across parts would join disjoint pieces.
+        stored_rings: list[list[list[float]]] = []
+        for ring in rings:
+            validated = validate_polygon(ring, width, height)
+            if payload.mode == "freehand":
+                simplified = simplify_polyline(validated, POLYGON_SIMPLIFY_TOLERANCE)
+                # Simplification can flatten a thin trace below a usable ring; fall
+                # back to the drawn outline rather than discarding the work.
+                validated = simplified if len(simplified) >= 3 else validated
+            stored_rings.append([[x, y] for x, y in validated])
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    # Freehand traces are stored simplified; a hand-placed polygon is kept as drawn.
-    stored = (
-        simplify_polyline(points, POLYGON_SIMPLIFY_TOLERANCE)
-        if payload.mode == "freehand"
-        else points
-    )
-    # Simplification can flatten a thin or straight trace below a usable polygon.
-    # Fall back to the drawn outline rather than discarding the annotator's work.
-    if len(stored) < 3:
-        stored = points
     try:
-        mask_png = polygon_mask_png(stored, width, height)
+        mask_png = parts_mask_png(stored_rings, width, height)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    # The polygon condition has no SAM2 prompt: the outline is the annotation, so
-    # the record stores it instead of inventing a point or box.
-    prompt = {"mode": payload.mode, "points": [[x, y] for x, y in stored]}
+    # The polygon condition has no SAM2 prompt: the outlines are the annotation,
+    # so the record stores them instead of inventing a point or box.
+    prompt = {"mode": payload.mode, "parts": stored_rings}
     try:
         result = await run_in_threadpool(
             save_and_evaluate_annotation,
@@ -270,6 +287,8 @@ async def save_polygon_annotation(payload: SavePolygonPayload) -> dict[str, Any]
     return {
         **result,
         "mode": payload.mode,
-        "outline": polygon_summary(stored),
-        "drawn_points": len(points),
+        "outline": polygon_summary(
+            [[(x, y) for x, y in ring] for ring in stored_rings]
+        ),
+        "drawn_points": sum(len(ring) for ring in rings),
     }

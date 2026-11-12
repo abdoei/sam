@@ -323,3 +323,40 @@ def test_save_polygon_rejects_annotation_for_another_image(tmp_path, monkeypatch
     response = client.post("/api/annotations/polygon", json=payload)
 
     assert response.status_code == 422
+
+
+def test_polygon_parts_are_scored_as_their_union(tmp_path, monkeypatch) -> None:
+    create_coco_fixture(tmp_path, monkeypatch)
+    # The fixture's annotation 12 is the 2x2 block at (1,1)-(2,2). The first part
+    # covers it; the second part is a disconnected piece elsewhere in the image.
+    payload = {
+        "image_id": 7,
+        "annotation_id": 12,
+        "elapsed_seconds": 7.0,
+        "parts": [
+            [[1, 1], [3, 1], [3, 3], [1, 3]],
+            [[0, 0], [1, 0], [1, 1], [0, 1]],
+        ],
+        "mode": "polygon",
+    }
+
+    body = client.post("/api/annotations/polygon", json=payload).json()
+
+    assert body["outline"]["part_count"] == 2
+    assert body["drawn_points"] == 8
+    # Both parts count towards the prediction: the extra piece sits outside the
+    # ground truth, so it lowers IoU rather than being ignored.
+    single = client.post(
+        "/api/annotations/polygon",
+        json={**payload, "parts": [payload["parts"][0]]},
+    ).json()
+    assert body["iou"] < single["iou"]
+
+
+def test_polygon_rejects_empty_payload(tmp_path, monkeypatch) -> None:
+    create_coco_fixture(tmp_path, monkeypatch)
+    payload = {"image_id": 7, "annotation_id": 12, "elapsed_seconds": 1.0}
+
+    response = client.post("/api/annotations/polygon", json=payload)
+
+    assert response.status_code == 422

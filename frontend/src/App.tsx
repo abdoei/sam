@@ -320,7 +320,9 @@ function App() {
     Record<number, Record<number, string>>
   >({});
   const [tool, setTool] = useState<Tool>("positive");
-  /** Outline being drawn, in image pixels; null when nothing is in progress. */
+  /** One ring per visible piece; parts already drawn persist while a new one is started. */
+  const [outlineParts, setOutlineParts] = useState<{ x: number; y: number }[][]>([]);
+  /** The ring currently being drawn, or null. */
   const [outline, setOutline] = useState<{ x: number; y: number }[] | null>(null);
   const drawingOutline = useRef(false);
   /** Result of the most recent polygon/freehand submission. */
@@ -613,32 +615,38 @@ function App() {
         if (draftBox) drawBox(draftBox, "#fbbf24");
       }
 
-      // The outline under construction, drawn in image coordinates like prompts.
-      if (outline && outline.length) {
-        context.beginPath();
-        context.moveTo(outline[0].x, outline[0].y);
-        for (const point of outline.slice(1)) {
-          context.lineTo(point.x, point.y);
-        }
-        if (tool === "freehand" || outline.length >= 3) {
-          context.closePath();
-          context.fillStyle = "rgba(34, 211, 238, 0.22)";
-          context.fill();
-        }
-        context.strokeStyle = "#22d3ee";
-        context.lineWidth = OUTLINE_SCREEN_WIDTH * pixelScale;
-        context.stroke();
-
-        // Vertex handles only while placing a polygon, and small enough not to
-        // hide the edge being drawn.
-        if (tool === "polygon") {
-          outline.forEach((point, index) => {
-            context.beginPath();
-            context.arc(point.x, point.y, POINT_SCREEN_RADIUS * pixelScale, 0, Math.PI * 2);
-            context.fillStyle = index === 0 ? "#fbbf24" : "#22d3ee";
+      // Finished parts and the ring in progress: every piece of the object stays
+      // visible so a second disconnected part adds to the first rather than
+      // replacing it.
+      const ringsToDraw = outline && outline.length ? [...outlineParts, outline] : outlineParts;
+      if (ringsToDraw.length) {
+        ringsToDraw.forEach((ring, ringIndex) => {
+          context.beginPath();
+          context.moveTo(ring[0].x, ring[0].y);
+          for (const point of ring.slice(1)) {
+            context.lineTo(point.x, point.y);
+          }
+          const isCurrent = ringIndex === ringsToDraw.length - 1 && !!outline?.length;
+          if (!isCurrent || tool === "freehand" || ring.length >= 3) {
+            context.closePath();
+            context.fillStyle = "rgba(34, 211, 238, 0.22)";
             context.fill();
-          });
-        }
+          }
+          context.strokeStyle = "#22d3ee";
+          context.lineWidth = OUTLINE_SCREEN_WIDTH * pixelScale;
+          context.stroke();
+
+          // Vertex handles only while placing a polygon, and small enough not to
+          // hide the edge being drawn.
+          if (tool === "polygon" && isCurrent) {
+            ring.forEach((point, index) => {
+              context.beginPath();
+              context.arc(point.x, point.y, POINT_SCREEN_RADIUS * pixelScale, 0, Math.PI * 2);
+              context.fillStyle = index === 0 ? "#fbbf24" : "#22d3ee";
+              context.fill();
+            });
+          }
+        });
       }
     };
 
@@ -749,6 +757,7 @@ function App() {
     referenceMaskBase64,
     showReferenceMask,
     outline,
+    outlineParts,
     tool,
   ]);
 
@@ -1032,13 +1041,16 @@ function App() {
     const coordinate = imageCoordinates(event);
     if (!coordinate) return;
     if (tool === "freehand") {
+      // Each drag is one part; parts already finished stay on screen and counted.
       startAnnotation();
       drawingOutline.current = true;
       setOutline([coordinate]);
+      setOutlineResult(null);
       event.currentTarget.setPointerCapture(event.pointerId);
       return;
     }
-    // Polygon: each click appends a vertex; clicking near the first closes it.
+    // Polygon: each click appends a vertex; clicking near the first closes it and
+    // keeps it as a finished part so the next click can start another.
     startAnnotation();
     setOutlineResult(null);
     setError(null);
@@ -1073,17 +1085,48 @@ function App() {
   function handleOutlinePointerUp() {
     if (tool !== "freehand" || !drawingOutline.current) return;
     drawingOutline.current = false;
+    // A finished drag becomes a part, so the next drag adds another piece.
+    setOutline((current) => {
+      if (current && current.length >= 3) {
+        setOutlineParts((parts) => [...parts, current]);
+      }
+      return null;
+    });
+  }
+
+  /** Rings that count towards the score: finished parts plus one in progress. */
+  function outlineRings(): { x: number; y: number }[][] {
+    const rings = [...outlineParts];
+    if (outline && outline.length >= 3) rings.push(outline);
+    return rings;
   }
 
   function closePolygon() {
-    if (!outline || outline.length < 3) {
-      setError("A polygon needs at least three vertices.");
+    const rings = outlineRings();
+    if (!rings.length) {
+      setError("Draw at least one part before scoring.");
       return;
     }
-    void submitOutline();
+    void submitOutline(rings);
+  }
+
+  /** Keep the current ring as a part so another disconnected piece can be drawn. */
+  function finishCurrentPart() {
+    if (!outline || outline.length < 3) {
+      setError("A part needs at least three points.");
+      return;
+    }
+    setOutlineParts((parts) => [...parts, outline]);
+    setOutline(null);
+    setError(null);
+  }
+
+  function undoPart() {
+    setOutlineParts((parts) => parts.slice(0, -1));
   }
 
   function clearOutline() {
+    setOutlineParts([]);
     setOutline(null);
     setOutlineResult(null);
     setError(null);
@@ -1091,8 +1134,8 @@ function App() {
     setAnnotationSeconds(null);
   }
 
-  async function submitOutline() {
-    if (!outline || outline.length < 3) return;
+  async function submitOutline(rings: { x: number; y: number }[][]) {
+    if (!rings.length) return;
     if (selectedCocoImageId === null || activeTarget?.annId === undefined) {
       setError("Select a COCO object row before scoring an outline.");
       return;
@@ -1109,7 +1152,7 @@ function App() {
           image_id: selectedCocoImageId,
           annotation_id: activeTarget.annId,
           elapsed_seconds: elapsedSeconds,
-          points: outline.map((point) => [point.x, point.y]),
+          parts: rings.map((ring) => ring.map((point) => [point.x, point.y])),
           mode: tool === "freehand" ? "freehand" : "polygon",
         }),
       });
@@ -1737,6 +1780,7 @@ function App() {
                   onClick={() => {
                     setTool(nextTool);
                     setOutline(null);
+                    setOutlineParts([]);
                     setOutlineResult(null);
                   }}
                   type="button"
@@ -2168,6 +2212,7 @@ function App() {
                           // pixels it covered are no longer what the annotator
                           // traced, so scoring it would measure the wrong shape.
                           setOutline(null);
+                          setOutlineParts([]);
                           setOutlineResult(null);
                           if (mediaMode === "image") {
                             setMask(imageMasks[object.id] ?? null);
@@ -2314,24 +2359,42 @@ function App() {
               <div className="outline-actions">
                 <p className="helper-text">
                   {tool === "polygon"
-                    ? `Click to place vertices (${outline?.length ?? 0} placed), then close the shape.`
-                    : "Drag to trace the object's outline, then close the shape."}
+                    ? `Click to place vertices (${outline?.length ?? 0} in this part), then close the shape.`
+                    : "Drag to trace one part, then start another if the object is split."}
+                  {outlineParts.length > 0 && (
+                    <strong>
+                      {" "}
+                      {outlineParts.length} part{outlineParts.length === 1 ? "" : "s"} kept.
+                    </strong>
+                  )}
                 </p>
                 <button
                   className="primary-button"
                   disabled={
                     isSavingOutline ||
-                    (outline?.length ?? 0) < 3 ||
+                    (outlineParts.length === 0 && (outline?.length ?? 0) < 3) ||
                     activeTarget?.annId === undefined
                   }
                   onClick={() => void closePolygon()}
                   type="button"
                 >
-                  {isSavingOutline
-                    ? "Saving outline…"
-                    : tool === "freehand"
-                      ? "Score traced outline"
-                      : "Close polygon and score"}
+                  {isSavingOutline ? "Saving outline…" : "Score all parts"}
+                </button>
+                <button
+                  className="secondary-button"
+                  disabled={(outline?.length ?? 0) < 3}
+                  onClick={finishCurrentPart}
+                  type="button"
+                >
+                  Add another part
+                </button>
+                <button
+                  className="secondary-button"
+                  disabled={outlineParts.length === 0}
+                  onClick={undoPart}
+                  type="button"
+                >
+                  Undo last part
                 </button>
                 <button
                   className="secondary-button"
