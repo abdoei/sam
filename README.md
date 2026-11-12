@@ -160,10 +160,16 @@ conditions covered, reporting the seconds saved and the percentage reduction.
 
 ## Exporting results
 
-Results are also visible and exportable from the web app: the **RESULTS** panel
-lists every saved annotation (category, IoU, Dice, annotation time) for the current
-image and for the whole dataset, with totals for both, and clicking a row shows the
-saved mask. **Export (.zip)** downloads the same bundle the CLI produces.
+Results are also visible and exportable from the web app. The **Results** tab is a
+full page rather than a panel, so the whole run can be reviewed:
+
+- summary tiles for annotation count, mean IoU/Dice and mean time, plus a count
+  per condition
+- every annotation grouped by image, filterable by condition, category and image
+  ID, and sortable by best IoU, slowest first, or category
+- clicking a row overlays the saved mask on the source image, so it is clear what
+  the mask actually captured; **Show mask only** toggles back to the stored PNG
+- **Export (.zip)** downloads the same bundle the CLI produces
 
 From the command line:
 

@@ -7,6 +7,8 @@ import {
   type PointerEvent,
 } from "react";
 import { compositeMaskPixels } from "./maskOverlay.mjs";
+import { ResultsPage, type ResultsResponse, type ResultRow } from "./ResultsPage";
+import { SavedMaskPreview } from "./SavedMaskPreview";
 import { zoomViewportFor } from "./targetZoom.mjs";
 import "./App.css";
 
@@ -74,36 +76,6 @@ type SavedAnnotation = {
   dice: number;
   elapsed_seconds: number;
   manifest_path: string;
-};
-
-type ResultRow = {
-  ann_id: number;
-  image_id: number;
-  category_name: string;
-  iou: number;
-  dice: number;
-  elapsed_seconds: number | null;
-  /** Which condition produced it, needed to address its saved mask. */
-  method: string;
-};
-
-type ResultSummary = {
-  count: number;
-  mean_iou?: number;
-  mean_dice?: number;
-  mean_seconds?: number | null;
-  timed_count?: number;
-};
-
-type ResultsResponse = {
-  image_id: number | null;
-  methods: {
-    method: string;
-    results: ResultRow[];
-    all_count: number;
-  }[];
-  totals: { scope: ResultSummary; all: ResultSummary };
-  errors: string[];
 };
 
 type VideoFramePrompts = {
@@ -322,7 +294,9 @@ async function extractVideoFrames(
 
 function App() {
   const [file, setFile] = useState<File | null>(null);
-  const [showAbout, setShowAbout] = useState(false);
+  const [activePage, setActivePage] = useState<"annotate" | "results" | "about">(
+    "annotate",
+  );
   const [mediaMode, setMediaMode] = useState<"image" | "video">("image");
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
@@ -390,6 +364,7 @@ function App() {
   /** Index of the prompt point highlighted in the list; the last one added by default. */
   const [highlightedPoint, setHighlightedPoint] = useState<number | null>(null);
   const [results, setResults] = useState<ResultsResponse | null>(null);
+  const [isResultsLoading, setIsResultsLoading] = useState(true);
   const [resultsVersion, setResultsVersion] = useState(0);
   const [isExporting, setIsExporting] = useState(false);
   /** Result row whose saved mask is being previewed. */
@@ -1031,13 +1006,11 @@ function App() {
     setAnnotationSeconds(null);
   }
 
-  // Results are refetched after every accepted annotation, so the panel shows what
-  // has actually been recorded rather than only the current session's scores.
+  // The results page browses every recorded annotation, so it fetches unscoped;
+  // it refetches whenever an annotation is accepted or the page is opened.
   useEffect(() => {
     let active = true;
-    const query =
-      selectedCocoImageId === null ? "" : `?image_id=${selectedCocoImageId}`;
-    fetch(`/api/results${query}`)
+    fetch("/api/results")
       .then(async (response) => {
         if (!response.ok) throw new Error(`Results unavailable (${response.status})`);
         return (await response.json()) as ResultsResponse;
@@ -1047,11 +1020,14 @@ function App() {
       })
       .catch(() => {
         if (active) setResults(null);
+      })
+      .finally(() => {
+        if (active) setIsResultsLoading(false);
       });
     return () => {
       active = false;
     };
-  }, [selectedCocoImageId, resultsVersion]);
+  }, [resultsVersion]);
 
   async function downloadResults() {
     setIsExporting(true);
@@ -1772,26 +1748,30 @@ function App() {
           </span>
         </a>
         <nav className="topbar-nav" aria-label="Main navigation">
-          <button
-            aria-current={!showAbout ? "page" : undefined}
-            className={`nav-button ${!showAbout ? "selected" : ""}`}
-            onClick={() => setShowAbout(false)}
-            type="button"
-          >
-            Annotate
-          </button>
-          <button
-            aria-current={showAbout ? "page" : undefined}
-            className={`nav-button ${showAbout ? "selected" : ""}`}
-            onClick={() => {
-              videoRef.current?.pause();
-              setIsVideoPlaying(false);
-              setShowAbout(true);
-            }}
-            type="button"
-          >
-            About
-          </button>
+          {(["annotate", "results", "about"] as const).map((page) => (
+            <button
+              aria-current={activePage === page ? "page" : undefined}
+              className={`nav-button ${activePage === page ? "selected" : ""}`}
+              key={page}
+              onClick={() => {
+                if (page !== "annotate") {
+                  videoRef.current?.pause();
+                  setIsVideoPlaying(false);
+                }
+                setActivePage(page);
+                if (page === "results") {
+                  setResultsVersion((current) => current + 1);
+                }
+              }}
+              type="button"
+            >
+              {page === "annotate"
+                ? "Annotate"
+                : page === "results"
+                  ? "Results"
+                  : "About"}
+            </button>
+          ))}
         </nav>
         <div
           className={`service-status ${health?.model.ready ? "is-ready" : ""}`}
@@ -1801,7 +1781,7 @@ function App() {
         </div>
       </header>
 
-      <section className="about-page" hidden={!showAbout}>
+      <section className="about-page" hidden={activePage !== "about"}>
           <div className="about-heading">
             <p className="eyebrow">ABOUT THIS PROJECT</p>
             <h1>Interactive segmentation, made local.</h1>
@@ -1850,7 +1830,25 @@ function App() {
           </section>
       </section>
 
-      <div className="annotator-view" hidden={showAbout}>
+      {activePage === "results" && (
+        <>
+          <ResultsPage
+            isExporting={isExporting}
+            loading={isResultsLoading}
+            onExport={() => void downloadResults()}
+            onPreview={setPreviewResult}
+            results={results}
+          />
+          {previewResult && (
+            <SavedMaskPreview
+              onClose={() => setPreviewResult(null)}
+              row={previewResult}
+            />
+          )}
+        </>
+      )}
+
+      <div className="annotator-view" hidden={activePage !== "annotate"}>
       <section className="intro">
         <div>
           <p className="eyebrow">INTERACTIVE SEGMENTATION · MILESTONE 2</p>
@@ -2748,126 +2746,6 @@ function App() {
               </p>
             )}
           </section>
-
-          <section className="card results-card">
-            <div className="card-heading">
-              <div>
-                <p className="eyebrow">RESULTS</p>
-                <h2>Everything annotated</h2>
-              </div>
-              <button
-                className="small-action-button"
-                disabled={isExporting || !results?.totals.all.count}
-                onClick={() => void downloadResults()}
-                type="button"
-              >
-                {isExporting ? "Packaging…" : "Export (.zip)"}
-              </button>
-            </div>
-
-            {results && results.totals.all.count > 0 ? (
-              <>
-                <div className="results-totals">
-                  <span>
-                    This image{" "}
-                    <strong>{results.totals.scope.count}</strong>
-                  </span>
-                  {results.totals.scope.mean_iou !== undefined && (
-                    <span>
-                      IoU <strong>{results.totals.scope.mean_iou.toFixed(3)}</strong>
-                    </span>
-                  )}
-                  {results.totals.scope.mean_seconds != null && (
-                    <span>
-                      <strong>{results.totals.scope.mean_seconds.toFixed(1)}s</strong>{" "}
-                      mean
-                    </span>
-                  )}
-                  <span>
-                    All images <strong>{results.totals.all.count}</strong>
-                  </span>
-                  {results.totals.all.mean_iou !== undefined && (
-                    <span>
-                      IoU <strong>{results.totals.all.mean_iou.toFixed(3)}</strong>
-                    </span>
-                  )}
-                </div>
-
-                <div className="results-list">
-                  {results.methods.map((entry) => (
-                    <div className="results-method" key={entry.method}>
-                      <p className="results-method-heading">
-                        {entry.method === "polygon" ? "Manual polygon" : "SAM2"}
-                        <span>
-                          {entry.results.length} here · {entry.all_count} total
-                        </span>
-                      </p>
-                      {entry.results.map((row) => (
-                        <div className="results-row" key={`${entry.method}-${row.ann_id}`}>
-                          <button
-                            className="results-row-main"
-                            onClick={() =>
-                              setPreviewResult({ ...row, method: entry.method })
-                            }
-                            type="button"
-                          >
-                            <span className="results-ann">{row.category_name}</span>
-                            <span className="results-ann-id">#{row.ann_id}</span>
-                            <span className="results-metrics">
-                              <span className="results-metric">
-                                IoU <strong>{row.iou.toFixed(3)}</strong>
-                              </span>
-                              <span className="results-metric">
-                                Dice <strong>{row.dice.toFixed(3)}</strong>
-                              </span>
-                              <span className="results-metric">
-                                {row.elapsed_seconds != null
-                                  ? `${row.elapsed_seconds.toFixed(1)}s`
-                                  : "—"}
-                              </span>
-                            </span>
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  ))}
-                </div>
-              </>
-            ) : (
-              <p className="helper-text">
-                Nothing saved yet. Accept a mask and it will appear here.
-              </p>
-            )}
-          </section>
-
-          {previewResult && selectedCocoImageId !== null && (
-            <section className="card mask-preview-card">
-              <div className="card-heading">
-                <div>
-                  <p className="eyebrow">SAVED MASK</p>
-                  <h2>
-                    {previewResult.category_name} #{previewResult.ann_id}
-                  </h2>
-                </div>
-                <button
-                  className="small-action-button"
-                  onClick={() => setPreviewResult(null)}
-                  type="button"
-                >
-                  Close
-                </button>
-              </div>
-              <img
-                alt={`Saved mask for annotation ${previewResult.ann_id}`}
-                className="saved-mask-preview"
-                src={`/api/results/masks/${previewResult.image_id}/${previewResult.ann_id}.png?method=${previewResult.method}`}
-              />
-              <p className="helper-text">
-                IoU {previewResult.iou.toFixed(3)} · Dice{" "}
-                {previewResult.dice.toFixed(3)}
-              </p>
-            </section>
-          )}
 
           <section className="protocol-note">
             <span className="note-icon" aria-hidden="true">
