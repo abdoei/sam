@@ -148,6 +148,31 @@ It writes `data/comparison.json` with each condition's mean IoU/Dice and
 annotation time, plus a paired comparison restricted to the annotations both
 conditions covered, reporting the seconds saved and the percentage reduction.
 
+## Exporting results
+
+To hand results to someone else, package them:
+
+```sh
+cd backend
+uv run python -m scripts.export_annotations                    # every condition with results
+uv run python -m scripts.export_annotations --method sam2      # one condition
+uv run python -m scripts.export_annotations --out dist --stem run1
+```
+
+This writes `data/exports/<stem>-<method>.zip` (plus a `-comparison.json` when
+several conditions are exported). Each archive is self-contained:
+
+| File | Contents |
+| --- | --- |
+| `predictions.json` | COCO-format annotations; `segmentation` is compressed RLE, loadable with `pycocotools.COCO` |
+| `metrics.csv` | Per-instance IoU, Dice and annotation time |
+| `masks/<ann_id>.png` | Binary prediction masks, one per annotation |
+| `manifest.json` | Counts, summary, tool versions and any skipped records |
+
+Records whose image is no longer in the subset are skipped and listed in the
+manifest's `skipped_records` rather than failing the export or being exported as a
+reference to an image the recipient does not have.
+
 Video mode accepts local MP4 files up to 100 MiB, including videos longer than
 15 seconds. For long videos, choose a 15-second segment with the segment-start
 slider and click **Apply tracking segment**. The browser samples up to 30 frames at 2
