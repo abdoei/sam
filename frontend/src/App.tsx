@@ -76,6 +76,36 @@ type SavedAnnotation = {
   manifest_path: string;
 };
 
+type ResultRow = {
+  ann_id: number;
+  image_id: number;
+  category_name: string;
+  iou: number;
+  dice: number;
+  elapsed_seconds: number | null;
+  /** Which condition produced it, needed to address its saved mask. */
+  method: string;
+};
+
+type ResultSummary = {
+  count: number;
+  mean_iou?: number;
+  mean_dice?: number;
+  mean_seconds?: number | null;
+  timed_count?: number;
+};
+
+type ResultsResponse = {
+  image_id: number | null;
+  methods: {
+    method: string;
+    results: ResultRow[];
+    all_count: number;
+  }[];
+  totals: { scope: ResultSummary; all: ResultSummary };
+  errors: string[];
+};
+
 type VideoFramePrompts = {
   points: PointPrompt[];
   box: BoxPrompt | null;
@@ -359,6 +389,11 @@ function App() {
   const [isRunning, setIsRunning] = useState(false);
   /** Index of the prompt point highlighted in the list; the last one added by default. */
   const [highlightedPoint, setHighlightedPoint] = useState<number | null>(null);
+  const [results, setResults] = useState<ResultsResponse | null>(null);
+  const [resultsVersion, setResultsVersion] = useState(0);
+  const [isExporting, setIsExporting] = useState(false);
+  /** Result row whose saved mask is being previewed. */
+  const [previewResult, setPreviewResult] = useState<ResultRow | null>(null);
   const [inferenceMs, setInferenceMs] = useState<number | null>(null);
   /** Inference time summed across every mask generation so far for the current object. */
   const [totalInferenceMs, setTotalInferenceMs] = useState(0);
@@ -996,6 +1031,56 @@ function App() {
     setAnnotationSeconds(null);
   }
 
+  // Results are refetched after every accepted annotation, so the panel shows what
+  // has actually been recorded rather than only the current session's scores.
+  useEffect(() => {
+    let active = true;
+    const query =
+      selectedCocoImageId === null ? "" : `?image_id=${selectedCocoImageId}`;
+    fetch(`/api/results${query}`)
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`Results unavailable (${response.status})`);
+        return (await response.json()) as ResultsResponse;
+      })
+      .then((body) => {
+        if (active) setResults(body);
+      })
+      .catch(() => {
+        if (active) setResults(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [selectedCocoImageId, resultsVersion]);
+
+  async function downloadResults() {
+    setIsExporting(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/export");
+      if (!response.ok) {
+        const body = (await response.json()) as { detail?: unknown };
+        throw new Error(errorMessage(body.detail));
+      }
+      const blob = await response.blob();
+      const disposition = response.headers.get("content-disposition") ?? "";
+      const match = /filename="([^"]+)"/.exec(disposition);
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = match?.[1] ?? "annotations.zip";
+      link.click();
+      URL.revokeObjectURL(link.href);
+    } catch (reason: unknown) {
+      setError(
+        reason instanceof Error
+          ? `Export failed: ${reason.message}`
+          : "Export failed.",
+      );
+    } finally {
+      setIsExporting(false);
+    }
+  }
+
   function handleCanvasPointerDown(event: PointerEvent<HTMLCanvasElement>) {
     if (OUTLINE_TOOLS.has(tool)) {
       handleOutlinePointerDown(event);
@@ -1207,6 +1292,7 @@ function App() {
         throw new Error("The backend response did not contain evaluation metrics.");
       }
       setOutlineResult(body);
+      setResultsVersion((current) => current + 1);
       setAnnotationSeconds(elapsedSeconds);
       setTrackedObjects((current) =>
         current.map((object) =>
@@ -1640,6 +1726,7 @@ function App() {
           );
         }
         setSavedAnnotation(body);
+        setResultsVersion((current) => current + 1);
         setAnnotationSeconds(elapsedSeconds);
         setTrackedObjects((current) =>
           current.map((object) =>
@@ -2661,6 +2748,126 @@ function App() {
               </p>
             )}
           </section>
+
+          <section className="card results-card">
+            <div className="card-heading">
+              <div>
+                <p className="eyebrow">RESULTS</p>
+                <h2>Everything annotated</h2>
+              </div>
+              <button
+                className="small-action-button"
+                disabled={isExporting || !results?.totals.all.count}
+                onClick={() => void downloadResults()}
+                type="button"
+              >
+                {isExporting ? "Packaging…" : "Export (.zip)"}
+              </button>
+            </div>
+
+            {results && results.totals.all.count > 0 ? (
+              <>
+                <div className="results-totals">
+                  <span>
+                    This image{" "}
+                    <strong>{results.totals.scope.count}</strong>
+                  </span>
+                  {results.totals.scope.mean_iou !== undefined && (
+                    <span>
+                      IoU <strong>{results.totals.scope.mean_iou.toFixed(3)}</strong>
+                    </span>
+                  )}
+                  {results.totals.scope.mean_seconds != null && (
+                    <span>
+                      <strong>{results.totals.scope.mean_seconds.toFixed(1)}s</strong>{" "}
+                      mean
+                    </span>
+                  )}
+                  <span>
+                    All images <strong>{results.totals.all.count}</strong>
+                  </span>
+                  {results.totals.all.mean_iou !== undefined && (
+                    <span>
+                      IoU <strong>{results.totals.all.mean_iou.toFixed(3)}</strong>
+                    </span>
+                  )}
+                </div>
+
+                <div className="results-list">
+                  {results.methods.map((entry) => (
+                    <div className="results-method" key={entry.method}>
+                      <p className="results-method-heading">
+                        {entry.method === "polygon" ? "Manual polygon" : "SAM2"}
+                        <span>
+                          {entry.results.length} here · {entry.all_count} total
+                        </span>
+                      </p>
+                      {entry.results.map((row) => (
+                        <div className="results-row" key={`${entry.method}-${row.ann_id}`}>
+                          <button
+                            className="results-row-main"
+                            onClick={() =>
+                              setPreviewResult({ ...row, method: entry.method })
+                            }
+                            type="button"
+                          >
+                            <span className="results-ann">{row.category_name}</span>
+                            <span className="results-ann-id">#{row.ann_id}</span>
+                            <span className="results-metrics">
+                              <span className="results-metric">
+                                IoU <strong>{row.iou.toFixed(3)}</strong>
+                              </span>
+                              <span className="results-metric">
+                                Dice <strong>{row.dice.toFixed(3)}</strong>
+                              </span>
+                              <span className="results-metric">
+                                {row.elapsed_seconds != null
+                                  ? `${row.elapsed_seconds.toFixed(1)}s`
+                                  : "—"}
+                              </span>
+                            </span>
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <p className="helper-text">
+                Nothing saved yet. Accept a mask and it will appear here.
+              </p>
+            )}
+          </section>
+
+          {previewResult && selectedCocoImageId !== null && (
+            <section className="card mask-preview-card">
+              <div className="card-heading">
+                <div>
+                  <p className="eyebrow">SAVED MASK</p>
+                  <h2>
+                    {previewResult.category_name} #{previewResult.ann_id}
+                  </h2>
+                </div>
+                <button
+                  className="small-action-button"
+                  onClick={() => setPreviewResult(null)}
+                  type="button"
+                >
+                  Close
+                </button>
+              </div>
+              <img
+                alt={`Saved mask for annotation ${previewResult.ann_id}`}
+                className="saved-mask-preview"
+                src={`/api/results/masks/${previewResult.image_id}/${previewResult.ann_id}.png?method=${previewResult.method}`}
+              />
+              <p className="helper-text">
+                IoU {previewResult.iou.toFixed(3)} · Dice{" "}
+                {previewResult.dice.toFixed(3)}
+              </p>
+            </section>
+          )}
 
           <section className="protocol-note">
             <span className="note-icon" aria-hidden="true">

@@ -1,15 +1,19 @@
 import base64
 import binascii
 import json
+import tempfile
 from pathlib import Path
 from typing import Any, Literal
+from zipfile import ZIP_DEFLATED, ZipFile
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from starlette.concurrency import run_in_threadpool
 
 from app.coco import (
+    EVALUATION_METHODS,
+    evaluation_dir,
     find_annotation,
     find_image,
     ground_truth_dir,
@@ -113,6 +117,134 @@ def coco_image(image_id: int) -> FileResponse:
             detail=f"COCO image {image_id} is missing from the local subset",
         )
     return FileResponse(path, media_type="image/jpeg")
+
+
+@app.get("/api/results")
+def list_results(image_id: int | None = None) -> dict[str, Any]:
+    """Every annotated object, optionally restricted to one image.
+
+    Returns per-object metrics plus roll-ups: one for the requested scope and one
+    across every recorded annotation, computed from the full records rather than
+    from the filtered rows.
+    """
+    from scripts.results_dataset import load_directory
+
+    methods: list[dict[str, Any]] = []
+    errors: list[str] = []
+    scoped: list[dict[str, Any]] = []
+    everything: list[dict[str, Any]] = []
+    for method in sorted(EVALUATION_METHODS):
+        directory = evaluation_dir(method)
+        if not (directory / "records").is_dir():
+            continue
+        try:
+            results = load_directory(directory, method)
+        except (FileNotFoundError, ValueError) as exc:
+            errors.append(f"{method}: {exc}")
+            continue
+        if not results:
+            continue
+        rows = [
+            {
+                "ann_id": result.ann_id,
+                "image_id": result.image_id,
+                "category_name": result.category_name,
+                "iou": result.iou,
+                "dice": result.dice,
+                "elapsed_seconds": result.elapsed_seconds,
+            }
+            for result in results
+        ]
+        everything.extend(rows)
+        visible = [
+            row for row in rows if image_id is None or row["image_id"] == image_id
+        ]
+        scoped.extend(visible)
+        methods.append({"method": method, "results": visible, "all_count": len(rows)})
+
+    return {
+        "image_id": image_id,
+        "methods": [entry for entry in methods if entry["results"]],
+        "totals": {
+            "scope": _summarise_results(scoped),
+            "all": _summarise_results(everything),
+        },
+        "errors": errors,
+    }
+
+
+def _summarise_results(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Count and mean IoU/Dice/time over a set of results."""
+    if not rows:
+        return {"count": 0}
+    ious = [row["iou"] for row in rows]
+    dices = [row["dice"] for row in rows]
+    times = [row["elapsed_seconds"] for row in rows if row["elapsed_seconds"] is not None]
+    return {
+        "count": len(rows),
+        "mean_iou": round(sum(ious) / len(ious), 4),
+        "mean_dice": round(sum(dices) / len(dices), 4),
+        "mean_seconds": round(sum(times) / len(times), 3) if times else None,
+        "timed_count": len(times),
+    }
+
+
+@app.get("/api/export")
+def download_export(methods: str | None = None) -> Response:
+    """Build the same archive the CLI writes and serve it as a download."""
+    from scripts.export_annotations import export
+
+    requested = [value for value in (methods or "").split(",") if value]
+    unknown = [value for value in requested if value not in EVALUATION_METHODS]
+    if unknown:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unknown method(s): {', '.join(unknown)}",
+        )
+    if not requested:
+        requested = sorted(EVALUATION_METHODS)
+
+    with tempfile.TemporaryDirectory(prefix="sam2-export-") as directory:
+        try:
+            written = export(requested, Path(directory), "annotations")
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+        archives = [path for path in written if path.suffix == ".zip"]
+        if not archives:
+            raise HTTPException(status_code=409, detail="Nothing to export")
+        if len(archives) == 1:
+            payload = archives[0].read_bytes()
+            filename = archives[0].name
+        else:
+            # Several conditions: hand back one bundle rather than forcing the
+            # browser to manage multiple downloads.
+            bundle = Path(directory) / "annotations-all.zip"
+            with ZipFile(bundle, "w", ZIP_DEFLATED) as archive:
+                for path in written:
+                    archive.write(path, arcname=path.name)
+            payload = bundle.read_bytes()
+            filename = bundle.name
+
+    return Response(
+        content=payload,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.get("/api/results/masks/{image_id}/{annotation_id}.png")
+def saved_mask(image_id: int, annotation_id: int, method: str = "sam2") -> FileResponse:
+    """Serve a saved prediction mask so the results panel can preview it."""
+    if method not in EVALUATION_METHODS:
+        raise HTTPException(status_code=422, detail=f"Unknown method: {method}")
+    path = evaluation_dir(method) / "predictions" / f"{annotation_id}.png"
+    if not path.is_file():
+        raise HTTPException(
+            status_code=404,
+            detail=f"No saved {method} mask for annotation {annotation_id}",
+        )
+    return FileResponse(path, media_type="image/png")
 
 
 @app.get("/api/coco/images/{image_id}/masks/{annotation_id}")

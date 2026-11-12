@@ -1181,3 +1181,104 @@ h2 {
     flex-direction: column;
   }
 }
+
+/* Results panel: a compact table of every saved annotation. */
+.results-totals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 10px 0;
+  color: #93a0b1;
+  font-size: 10px;
+}
+
+.results-totals strong {
+  color: #e7edf5;
+}
+
+.results-list {
+  display: grid;
+  gap: 10px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.results-method-heading {
+  display: flex;
+  justify-content: space-between;
+  margin: 0 0 4px;
+  color: #8b98a9;
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.results-row-main {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas:
+    "name id"
+    "metrics metrics";
+  align-items: baseline;
+  gap: 2px 8px;
+  width: 100%;
+  padding: 7px 9px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: #151a20;
+  color: #c3ccd8;
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  text-align: left;
+}
+
+.results-row-main:hover {
+  border-color: rgba(34, 211, 238, 0.6);
+  background: #1b222a;
+}
+
+.results-ann {
+  grid-area: name;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  color: #e7edf5;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.results-ann-id {
+  grid-area: id;
+  color: #7d8a9b;
+  font-size: 9px;
+}
+
+.results-metrics {
+  grid-area: metrics;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 10px;
+  color: #9aa7b7;
+}
+
+.results-metric {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.results-metric strong {
+  color: #e7edf5;
+}
+
+.saved-mask-preview {
+  display: block;
+  width: 100%;
+  max-height: 220px;
+  margin: 10px 0;
+  border: 1px solid var(--border, #2a323c);
+  border-radius: 6px;
+  background: #0b0f14;
+  image-rendering: pixelated;
+  object-fit: contain;
+}

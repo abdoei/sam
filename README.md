@@ -160,7 +160,12 @@ conditions covered, reporting the seconds saved and the percentage reduction.
 
 ## Exporting results
 
-To hand results to someone else, package them:
+Results are also visible and exportable from the web app: the **RESULTS** panel
+lists every saved annotation (category, IoU, Dice, annotation time) for the current
+image and for the whole dataset, with totals for both, and clicking a row shows the
+saved mask. **Export (.zip)** downloads the same bundle the CLI produces.
+
+From the command line:
 
 ```sh
 cd backend
