@@ -88,12 +88,21 @@ val2017 image archive. The selected IDs are recorded in
 artifacts are ignored by Git. Read the source image licenses before redistribution.
 
 In the web app, choose Image or Video mode. For images, select a COCO sample and
-target object or upload a local image. Add objects, add or remove point and
-rectangle prompts for each object, and generate separate masks in the object's
-display color. Accepting a COCO annotation scores the selected object's mask
-against the matching ground-truth mask and records IoU/Dice, prompt data, and
-annotation time in ignored `data/evaluation/` files. Uploaded images can be
-segmented and timed, but COCO metrics are only available for the bundled subset.
+target object or upload a local image. Selecting a COCO sample loads one object
+row per non-crowd ground-truth annotation, numbered within its category
+(`person #1`, `person #2`, …), so several instances of the same category are
+separately selectable and each is scored against its own annotation. Each row
+carries a colour, and the image shows a small number at every ground-truth
+mask's centre of mass to identify the targets; those numbers are shared up and
+out when objects crowd together, with a leader dot marking the true centroid.
+Ground-truth mask boundaries are not drawn. After a mask is accepted, that row
+shows its IoU and untouched rows stay blank. Uploaded images keep the free-form
+object flow, and add or remove point and rectangle prompts for each object, then
+generate separate masks in the object's display colour. Accepting a COCO
+annotation scores the selected object's mask against the matching ground-truth
+mask and records IoU/Dice, prompt data, and annotation time in ignored
+`data/evaluation/` files. Uploaded images can be segmented and timed, but COCO
+metrics are only available for the bundled subset.
 
 Video mode accepts local MP4 files up to 100 MiB, including videos longer than
 15 seconds. For long videos, choose a 15-second segment with the segment-start

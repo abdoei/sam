@@ -66,6 +66,8 @@ def test_coco_image_listing_and_serving(tmp_path, monkeypatch) -> None:
             "category_id": 3,
             "category_name": "object",
             "area": 4,
+            "label": "object #1",
+            "centroid": {"x": 1.5, "y": 1.5},
         }
     ]
     assert image.status_code == 200
@@ -101,6 +103,75 @@ def test_save_annotation_computes_metrics_and_writes_manifest(tmp_path, monkeypa
     ]
     assert (tmp_path / "evaluation/records/12.json").is_file()
     assert (tmp_path / "evaluation/predictions/12.png").is_file()
+
+
+def test_annotations_of_one_category_get_distinct_labels_and_centroids(
+    tmp_path, monkeypatch
+) -> None:
+    subset_dir = tmp_path / "coco_subset"
+    annotations_dir = subset_dir / "annotations"
+    annotations_dir.mkdir(parents=True)
+    gt_dir = tmp_path / "gt_masks" / "9"
+    gt_dir.mkdir(parents=True)
+
+    subset = {
+        "images": [{"id": 9, "file_name": "people.jpg", "width": 12, "height": 4}],
+        "annotations": [
+            {"id": 103, "image_id": 9, "category_id": 1, "area": 4, "iscrowd": 0},
+            {"id": 101, "image_id": 9, "category_id": 1, "area": 4, "iscrowd": 0},
+            {"id": 102, "image_id": 9, "category_id": 1, "area": 4, "iscrowd": 0},
+        ],
+        "categories": [{"id": 1, "name": "person"}],
+    }
+    (annotations_dir / "subset.json").write_text(json.dumps(subset), encoding="utf-8")
+
+    # One solid 2x2 block per annotation, at increasing x.
+    for annotation_id, x_start in ((101, 0), (102, 5), (103, 10)):
+        mask = Image.new("L", (12, 4))
+        for x in range(x_start, x_start + 2):
+            for y in (1, 2):
+                mask.putpixel((x, y), 255)
+        mask.save(gt_dir / f"{annotation_id}.png", format="PNG")
+
+    monkeypatch.setenv("COCO_SUBSET_JSON", str(annotations_dir / "subset.json"))
+    monkeypatch.setenv("COCO_GT_DIR", str(tmp_path / "gt_masks"))
+    monkeypatch.setenv("COCO_EVALUATION_DIR", str(tmp_path / "evaluation"))
+
+    annotations = client.get("/api/coco/images").json()["images"][0]["annotations"]
+
+    assert [annotation["id"] for annotation in annotations] == [101, 102, 103]
+    assert [annotation["label"] for annotation in annotations] == [
+        "person #1",
+        "person #2",
+        "person #3",
+    ]
+    assert [annotation["centroid"] for annotation in annotations] == [
+        {"x": 0.5, "y": 1.5},
+        {"x": 5.5, "y": 1.5},
+        {"x": 10.5, "y": 1.5},
+    ]
+
+
+def test_annotation_without_ground_truth_mask_has_no_centroid(tmp_path, monkeypatch) -> None:
+    subset_dir = tmp_path / "coco_subset"
+    annotations_dir = subset_dir / "annotations"
+    annotations_dir.mkdir(parents=True)
+    subset = {
+        "images": [{"id": 4, "file_name": "x.jpg", "width": 4, "height": 4}],
+        "annotations": [
+            {"id": 55, "image_id": 4, "category_id": 1, "area": 4, "iscrowd": 0},
+        ],
+        "categories": [{"id": 1, "name": "person"}],
+    }
+    (annotations_dir / "subset.json").write_text(json.dumps(subset), encoding="utf-8")
+    monkeypatch.setenv("COCO_SUBSET_JSON", str(annotations_dir / "subset.json"))
+    monkeypatch.setenv("COCO_GT_DIR", str(tmp_path / "gt_masks"))
+    monkeypatch.setenv("COCO_EVALUATION_DIR", str(tmp_path / "evaluation"))
+
+    annotation = client.get("/api/coco/images").json()["images"][0]["annotations"][0]
+
+    assert annotation["label"] == "person #1"
+    assert annotation["centroid"] is None
 
 
 def test_save_annotation_rejects_annotation_for_another_image(tmp_path, monkeypatch) -> None:

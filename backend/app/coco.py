@@ -74,6 +74,15 @@ def image_records() -> list[dict[str, Any]]:
             }
         )
 
+    for image_id, annotations in annotations_by_image.items():
+        annotations.sort(key=lambda item: item["id"])
+        seen: dict[str, int] = {}
+        for annotation in annotations:
+            name = annotation["category_name"]
+            seen[name] = seen.get(name, 0) + 1
+            annotation["label"] = f"{name} #{seen[name]}"
+            annotation["centroid"] = ground_truth_centroid(image_id, annotation["id"])
+
     return [
         {
             "id": int(image["id"]),
@@ -98,6 +107,28 @@ def image_path(image: dict[str, Any]) -> Path:
     if Path(file_name).name != file_name or file_name in {"", ".", ".."}:
         raise ValueError(f"Unsafe COCO image filename: {file_name!r}")
     return subset_path().parent.parent / "images" / file_name
+
+
+def ground_truth_centroid(image_id: int, annotation_id: int) -> dict[str, float] | None:
+    """Return the centre of mass of an annotation's ground-truth mask, in pixels.
+
+    The centroid is used only to label targets in the annotation UI; it is read from
+    the exported GT mask so the number lands inside the object even when the mask is
+    concave. Returns None when the mask has no foreground pixels or is unavailable.
+    """
+    path = ground_truth_dir() / str(image_id) / f"{annotation_id}.png"
+    try:
+        with Image.open(path) as image:
+            mask = np.asarray(image.convert("L"), dtype=np.uint8) > 0
+    except (FileNotFoundError, UnidentifiedImageError, OSError):
+        return None
+    rows, columns = np.nonzero(mask)
+    if rows.size == 0:
+        return None
+    return {
+        "x": round(float(columns.mean()), 2),
+        "y": round(float(rows.mean()), 2),
+    }
 
 
 def find_annotation(annotation_id: int) -> tuple[dict[str, Any], dict[str, Any]]:

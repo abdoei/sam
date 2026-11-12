@@ -1,11 +1,13 @@
 import {
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ChangeEvent,
   type PointerEvent,
 } from "react";
 import { compositeMaskPixels } from "./maskOverlay.mjs";
+import { layoutMarkers, MIN_MARKER_SCREEN_RADIUS } from "./markerLayout.mjs";
 import "./App.css";
 
 type Tool = "positive" | "negative" | "box";
@@ -51,6 +53,8 @@ type CocoAnnotation = {
   category_id: number;
   category_name: string;
   area: number;
+  label?: string;
+  centroid?: { x: number; y: number } | null;
 };
 
 type CocoImage = {
@@ -78,6 +82,10 @@ type TrackedObject = {
   id: number;
   name: string;
   color: string;
+  /** COCO annotation this object is scored against, when seeded from ground truth. */
+  annId?: number;
+  /** IoU recorded after this object's mask was accepted; absent until then. */
+  iou?: number;
 };
 
 type VideoTrackResponse = {
@@ -106,6 +114,15 @@ const VIDEO_FRAME_INTERVAL_SECONDS = 0.5;
 const MAX_VIDEO_DURATION_SECONDS = 15;
 const MAX_VIDEO_FILE_BYTES = 100 * 1024 * 1024;
 const MAX_VIDEO_FRAME_DIMENSION = 1280;
+
+function objectsFromAnnotations(annotations: CocoAnnotation[]): TrackedObject[] {
+  return annotations.map((annotation, index) => ({
+    id: index + 1,
+    name: annotation.label ?? `${annotation.category_name} #${index + 1}`,
+    color: TRACK_OBJECT_COLORS[index % TRACK_OBJECT_COLORS.length],
+    annId: annotation.id,
+  }));
+}
 
 function monotonicNow(): number {
   return performance.now();
@@ -303,6 +320,35 @@ function App() {
     };
   const activeObjectPrompts =
     mediaMode === "video" ? activeVideoFramePrompts : activeImagePrompts;
+  const activeTarget = useMemo(
+    () => trackedObjects.find((object) => object.id === activeTrackedObjectId),
+    [trackedObjects, activeTrackedObjectId],
+  );
+  // Ground-truth centroids label each target; only COCO samples have them.
+  const targetCentroids = useMemo(
+    () =>
+      mediaMode === "image" && selectedCocoImageId !== null
+        ? (cocoImages
+            .find((image) => image.id === selectedCocoImageId)
+            ?.annotations.map((annotation, index) => ({
+              index: index + 1,
+              centroid: annotation.centroid,
+              annId: annotation.id,
+              area: annotation.area,
+            }))
+            .filter(
+              (
+                entry,
+              ): entry is {
+                index: number;
+                centroid: { x: number; y: number };
+                annId: number;
+                area: number;
+              } => entry.centroid != null,
+            ) ?? [])
+        : [],
+    [cocoImages, mediaMode, selectedCocoImageId],
+  );
 
   useEffect(() => {
     let active = true;
@@ -430,6 +476,57 @@ function App() {
         });
         if (draftBox) drawBox(draftBox, "#fbbf24");
       }
+
+      if (mediaMode === "image") {
+        // Numbered markers label each ground-truth target. Markers keep a legible
+        // size and are pushed clear of each other, so several small targets close
+        // together still read as separate numbers; a leader line marks the move.
+        // The canvas buffer is the image's pixel size but CSS stretches it to the
+        // panel, so markers are sized in on-screen pixels and converted back to
+        // image pixels; otherwise they shrink with the preview.
+        const displayScale =
+          canvas.getBoundingClientRect().width / imageSize.width || 1;
+        const markerRadius = Math.min(
+          imageSize.width / 12,
+          MIN_MARKER_SCREEN_RADIUS / displayScale,
+        );
+        const markerPositions = layoutMarkers(
+          targetCentroids.map(({ centroid }) => centroid),
+          markerRadius,
+          imageSize,
+        );
+        targetCentroids.forEach(({ index, annId }, markerIndex) => {
+          const { x, y, originX, originY, moved } =
+            markerPositions[markerIndex];
+
+          if (moved) {
+            context.beginPath();
+            context.moveTo(originX, originY);
+            context.lineTo(x, y);
+            context.strokeStyle = "rgba(248, 250, 252, 0.55)";
+            context.lineWidth = 1;
+            context.stroke();
+            context.beginPath();
+            context.arc(originX, originY, Math.max(1.5, markerRadius / 4), 0, Math.PI * 2);
+            context.fillStyle = "rgba(248, 250, 252, 0.75)";
+            context.fill();
+          }
+
+          context.beginPath();
+          context.arc(x, y, markerRadius, 0, Math.PI * 2);
+          context.fillStyle = "rgba(15, 23, 42, 0.88)";
+          context.fill();
+          context.strokeStyle =
+            annId === activeTarget?.annId ? "#fbbf24" : "#f8fafc";
+          context.lineWidth = annId === activeTarget?.annId ? 2 : 1.2;
+          context.stroke();
+          context.fillStyle = "#f8fafc";
+          context.font = `600 ${Math.round(markerRadius * 1.4)}px ui-sans-serif, system-ui, sans-serif`;
+          context.textAlign = "center";
+          context.textBaseline = "middle";
+          context.fillText(String(index), x, y);
+        });
+      }
     };
 
     const masks =
@@ -496,12 +593,14 @@ function App() {
       active = false;
     };
   }, [
+    activeTarget,
     currentVideoFrame,
     draftBox,
     imageMasks,
     imagePrompts,
     imageSize,
     mediaMode,
+    targetCentroids,
     trackedObjects,
     videoMasks,
     videoPrompts,
@@ -657,6 +756,11 @@ function App() {
       });
       setFile(nextFile);
       setSelectedCocoImageId(imageId);
+      const seededObjects = objectsFromAnnotations(record.annotations);
+      setTrackedObjects(
+        seededObjects.length ? seededObjects : [INITIAL_TRACKED_OBJECT],
+      );
+      setActiveTrackedObjectId(seededObjects[0]?.id ?? INITIAL_TRACKED_OBJECT.id);
       setAnnotationId(record.annotations[0]?.id.toString() ?? "");
       setImageUrl(URL.createObjectURL(nextFile));
       setImageSize(null);
@@ -664,8 +768,6 @@ function App() {
       setImageMasks({});
       setVideoPrompts({});
       setVideoMasks({});
-      setTrackedObjects([INITIAL_TRACKED_OBJECT]);
-      setActiveTrackedObjectId(INITIAL_TRACKED_OBJECT.id);
       setDraftBox(null);
       boxStart.current = null;
       setMask(null);
@@ -1123,7 +1225,11 @@ function App() {
   async function acceptAnnotation() {
     if (annotationStart.current === null) return;
     const elapsedSeconds = (monotonicNow() - annotationStart.current) / 1000;
-    if (selectedCocoImageId !== null && annotationId) {
+    const activeObject = trackedObjects.find(
+      (object) => object.id === activeTrackedObjectId,
+    );
+    const targetAnnotationId = activeObject?.annId ?? Number(annotationId);
+    if (selectedCocoImageId !== null && targetAnnotationId) {
       const prompts = imagePrompts[activeTrackedObjectId] ?? {
         points: [],
         box: null,
@@ -1136,7 +1242,7 @@ function App() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             image_id: selectedCocoImageId,
-            annotation_id: Number(annotationId),
+            annotation_id: targetAnnotationId,
             elapsed_seconds: elapsedSeconds,
             mask_png_base64: mask?.mask_png_base64,
             prompt: {
@@ -1165,6 +1271,13 @@ function App() {
         }
         setSavedAnnotation(body);
         setAnnotationSeconds(elapsedSeconds);
+        setTrackedObjects((current) =>
+          current.map((object) =>
+            object.id === activeTrackedObjectId
+              ? { ...object, iou: body.iou }
+              : object,
+          ),
+        );
         annotationStart.current = null;
       } catch (reason: unknown) {
         setError(reason instanceof Error ? reason.message : String(reason));
@@ -1713,16 +1826,27 @@ function App() {
                         <i style={{ backgroundColor: object.color }} />
                         {object.name}
                         <span>
-                          {mediaMode === "video"
-                            ? `${objectPromptCount} frames`
-                            : `${objectPromptCount} prompts`}
+                          {object.iou !== undefined
+                            ? `IoU ${object.iou.toFixed(3)}`
+                            : mediaMode === "video"
+                              ? `${objectPromptCount} frames`
+                              : `${objectPromptCount} prompts`}
                         </span>
                       </button>
                       <button
                         aria-label={`Remove ${object.name}`}
                         className="remove-object-button"
-                        disabled={trackedObjects.length <= 1 || isRunning}
+                        disabled={
+                          object.annId !== undefined ||
+                          trackedObjects.length <= 1 ||
+                          isRunning
+                        }
                         onClick={() => removeTrackedObject(object.id)}
+                        title={
+                          object.annId !== undefined
+                            ? "Seeded from ground truth; cannot be removed"
+                            : undefined
+                        }
                         type="button"
                       >
                         ×
@@ -1790,31 +1914,15 @@ function App() {
               )}
               {mediaMode === "image" &&
                 (selectedCocoImageId !== null ? (
-                  <label className="annotation-id-field">
-                    Target COCO object <span>(ground truth hidden)</span>
-                    <select
-                      onChange={(event) => {
-                        setAnnotationId(event.currentTarget.value);
-                        setImagePrompts({});
-                        setImageMasks({});
-                        setDraftBox(null);
-                        setMask(null);
-                        setInferenceMs(null);
-                        setAnnotationSeconds(null);
-                        setSavedAnnotation(null);
-                        annotationStart.current = null;
-                      }}
-                      value={annotationId}
-                    >
-                      {cocoImages
-                        .find((image) => image.id === selectedCocoImageId)
-                        ?.annotations.map((annotation) => (
-                          <option key={annotation.id} value={annotation.id}>
-                            {annotation.category_name} · #{annotation.id}
-                          </option>
-                        ))}
-                    </select>
-                  </label>
+                  <p className="annotation-id-field target-object-summary">
+                    Target objects <span>(from COCO ground truth)</span>
+                    <strong>
+                      {activeTarget?.name ?? "—"}
+                      {activeTarget?.annId !== undefined
+                        ? ` · annotation #${activeTarget.annId}`
+                        : ""}
+                    </strong>
+                  </p>
                 ) : (
                   <label className="annotation-id-field">
                     COCO annotation ID <span>(for naming downloads)</span>
