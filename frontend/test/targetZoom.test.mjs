@@ -41,11 +41,22 @@ test("a large target still zooms instead of framing the whole image", () => {
   assert.ok(meter[3] / view.height > 0.4, `fill ${meter[3] / view.height}`);
 });
 
-test("declines to zoom a target that already dominates the image", () => {
-  // The airplane spans 340 of 640 px, so any crop that contains it is barely
-  // smaller than the photograph; showing the frame unchanged is the honest result.
+test("a large target zooms as far as the frame allows", () => {
+  // The airplane spans 340 of 640 px. The preferred half-fill crop would clamp to
+  // the whole photograph, so it zooms to the tightest bounding crop instead —
+  // about 1.4x — rather than declining to zoom at all.
   const airplane = [163.76, 172.1, 339.92, 104.15];
-  assert.equal(zoomViewportFor(airplane, WIDE_IMAGE), null);
+  const view = zoomViewportFor(airplane, WIDE_IMAGE);
+
+  assert.ok(view, "even a large target should zoom");
+  assert.ok(view.width < WIDE_IMAGE.width, "narrower than the full image");
+  assert.ok(WIDE_IMAGE.width / view.width > 1.3, `magnification ${WIDE_IMAGE.width / view.width}`);
+  assert.ok(containsFully(view, airplane));
+});
+
+test("declines to zoom only when the box nearly spans the image", () => {
+  // 620 of 640 px leaves nothing to crop away on either axis.
+  assert.equal(zoomViewportFor([10, 10, 620, 460], WIDE_IMAGE), null);
 });
 
 test("targets of similar relative size are framed at similar magnification", () => {

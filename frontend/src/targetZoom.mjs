@@ -12,12 +12,21 @@ const TARGET_FILL_FRACTION = 0.5;
 const MIN_VIEWPORT_PIXELS = 120;
 
 /**
+ * Smallest useful magnification. A crop must remove at least this share of the
+ * image on its long axis to be worth showing: below it the "zoom" is a few pixels
+ * of trimming that reads as no change at all. A large object is zoomed as far as
+ * the frame allows rather than declining entirely, because even a modest crop
+ * confirms which target the row refers to.
+ */
+const MIN_ZOOM_REDUCTION = 0.05;
+
+/**
  * Viewport that frames one COCO object, in image pixels.
  *
  * `bbox` is COCO's [x, y, width, height]. The viewport is sized so the object
  * fills TARGET_FILL_FRACTION of it, then clamped to the image so it never shows
- * space outside the photograph. Returns null when the object is missing, or when
- * the framing would show essentially the whole image, where zooming gains nothing.
+ * space outside the photograph. Returns null only when the object is missing or
+ * when even the tightest possible crop would trim almost nothing from the frame.
  */
 export function zoomViewportFor(bbox, imageSize) {
   if (!bbox || !imageSize) return null;
@@ -30,20 +39,40 @@ export function zoomViewportFor(bbox, imageSize) {
   // Size the short side first, then let the long side follow the image's aspect:
   // a square crop of a wide photograph overruns the short side and clamps
   // straight back to the whole frame, which is why large targets never zoomed.
-  const side = Math.max(
-    MIN_VIEWPORT_PIXELS,
-    Math.max(width, height) / TARGET_FILL_FRACTION,
-  );
+  const targetFillSide = Math.max(width, height) / TARGET_FILL_FRACTION;
   const imageAspect = imageSize.width / imageSize.height;
-  const viewWidth =
-    imageAspect >= 1
-      ? Math.min(imageSize.width, side * imageAspect)
-      : Math.min(imageSize.width, side);
-  const viewHeight =
-    imageAspect >= 1
-      ? Math.min(imageSize.height, side)
-      : Math.min(imageSize.height, side / imageAspect);
-  if (viewWidth >= imageSize.width * 0.98 && viewHeight >= imageSize.height * 0.98) {
+  const boundsFrom = (shortSide) => ({
+    width:
+      imageAspect >= 1
+        ? Math.min(imageSize.width, shortSide * imageAspect)
+        : Math.min(imageSize.width, shortSide),
+    height:
+      imageAspect >= 1
+        ? Math.min(imageSize.height, shortSide)
+        : Math.min(imageSize.height, shortSide / imageAspect),
+  });
+
+  let { width: viewWidth, height: viewHeight } = boundsFrom(
+    Math.max(MIN_VIEWPORT_PIXELS, targetFillSide),
+  );
+
+  // A target that fills the frame at the preferred magnification would clamp to
+  // the whole photograph. Rather than declining, shrink the crop as far as the
+  // box allows, so a large object still zooms as much as its size permits.
+  const shortSideLimit = Math.min(imageSize.width, imageSize.height);
+  if (
+    viewWidth > imageSize.width * (1 - MIN_ZOOM_REDUCTION) &&
+    viewHeight > imageSize.height * (1 - MIN_ZOOM_REDUCTION)
+  ) {
+    const fitted = boundsFrom(Math.min(shortSideLimit, Math.max(width, height)));
+    viewWidth = fitted.width;
+    viewHeight = fitted.height;
+  }
+
+  if (
+    viewWidth > imageSize.width * (1 - MIN_ZOOM_REDUCTION) &&
+    viewHeight > imageSize.height * (1 - MIN_ZOOM_REDUCTION)
+  ) {
     return null;
   }
 
