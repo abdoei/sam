@@ -160,6 +160,22 @@ const toolLabels: Record<Tool, string> = {
 /** Tools that draw the manual outline condition instead of prompting SAM2. */
 const OUTLINE_TOOLS = new Set<Tool>(["polygon", "freehand"]);
 
+/** The two annotation approaches, each with only the tools it needs. */
+type AnnotationApproach = "sam2" | "outline";
+
+const TOOLS_BY_APPROACH: Record<AnnotationApproach, Tool[]> = {
+  sam2: ["positive", "negative", "box"],
+  outline: ["polygon", "freehand"],
+};
+
+const TOOL_ICONS: Record<Tool, string> = {
+  positive: "+",
+  negative: "−",
+  box: "□",
+  polygon: "⬡",
+  freehand: "✎",
+};
+
 function errorMessage(detail: unknown): string {
   if (typeof detail === "string") return detail;
   if (detail) return JSON.stringify(detail);
@@ -320,6 +336,8 @@ function App() {
     Record<number, Record<number, string>>
   >({});
   const [tool, setTool] = useState<Tool>("positive");
+  const [annotationApproach, setAnnotationApproach] =
+    useState<AnnotationApproach>("sam2");
   /** One ring per visible piece; parts already drawn persist while a new one is started. */
   const [outlineParts, setOutlineParts] = useState<{ x: number; y: number }[][]>([]);
   /** The ring currently being drawn, or null. */
@@ -1737,8 +1755,8 @@ function App() {
           <p className="eyebrow">INTERACTIVE SEGMENTATION · MILESTONE 2</p>
           <h1>Label with a few prompts.</h1>
           <p className="subtitle">
-            Add object or background clicks, or draw a box. SAM2 generates a
-            local mask for review.
+            Prompt SAM2 with clicks or a box, or draw the outline yourself. Both
+            score against the same ground truth for comparison.
           </p>
         </div>
       </section>
@@ -1796,8 +1814,35 @@ function App() {
                 {showReferenceMask ? "Hide reference mask" : "Show reference mask"}
               </button>
             )}
-            <div className="tool-group" role="group" aria-label="Prompt tool">
-              {(["positive", "negative", "box", "polygon", "freehand"] as const).map((nextTool) => (
+            <div className="tool-group" role="group" aria-label="Annotation approach">
+              {(["sam2", "outline"] as const).map((approach) => (
+                <button
+                  aria-pressed={annotationApproach === approach}
+                  className={`mode-button ${annotationApproach === approach ? "selected" : ""}`}
+                  key={approach}
+                  onClick={() => {
+                    setAnnotationApproach(approach);
+                    // Each approach keeps its own tools; leaving the outline state
+                    // behind would score rings drawn for the other condition.
+                    setOutline(null);
+                    setOutlineParts([]);
+                    setOutlineResult(null);
+                    setTool(approach === "sam2" ? "positive" : "polygon");
+                  }}
+                  type="button"
+                >
+                  {approach === "sam2" ? "SAM2 prompts" : "Manual outline"}
+                </button>
+              ))}
+            </div>
+            <div
+              className="tool-group"
+              role="group"
+              aria-label={
+                annotationApproach === "sam2" ? "Prompt tool" : "Outline tool"
+              }
+            >
+              {TOOLS_BY_APPROACH[annotationApproach].map((nextTool) => (
                 <button
                   className={`tool-button ${tool === nextTool ? "selected" : ""}`}
                   key={nextTool}
@@ -1811,15 +1856,7 @@ function App() {
                   aria-pressed={tool === nextTool}
                 >
                   <span className={`tool-icon ${nextTool}`} aria-hidden="true">
-                    {nextTool === "positive"
-                      ? "+"
-                      : nextTool === "negative"
-                        ? "−"
-                        : nextTool === "box"
-                          ? "□"
-                          : nextTool === "polygon"
-                            ? "⬡"
-                            : "✎"}
+                    {TOOL_ICONS[nextTool]}
                   </span>
                   {toolLabels[nextTool]}
                 </button>
@@ -2183,20 +2220,32 @@ function App() {
                 ? `Add prompts for ${trackedObjects.find((object) => object.id === activeTrackedObjectId)?.name ?? "this object"} at frame ${currentVideoFrame + 1}.`
                 : tool === "box"
                   ? "Drag on the image to draw a rectangle around the selected object."
-                  : tool === "positive"
-                    ? "Click the object to add a positive point."
-                    : "Click the background to add a negative point."}
+                  : tool === "polygon"
+                    ? "Click to place outline vertices; close the shape to score it."
+                    : tool === "freehand"
+                      ? "Drag to trace the object's outline, part by part."
+                      : tool === "positive"
+                        ? "Click the object to add a positive point."
+                        : "Click the background to add a negative point."}
             </p>
             <div className="legend">
-              <span>
-                <i className="legend-dot positive-dot" /> Object
-              </span>
-              <span>
-                <i className="legend-dot negative-dot" /> Background
-              </span>
-              <span>
-                <i className="legend-box" /> Box
-              </span>
+              {annotationApproach === "outline" ? (
+                <span>
+                  <i className="legend-line outline-dot" /> Outline
+                </span>
+              ) : (
+                <>
+                  <span>
+                    <i className="legend-dot positive-dot" /> Object
+                  </span>
+                  <span>
+                    <i className="legend-dot negative-dot" /> Background
+                  </span>
+                  <span>
+                    <i className="legend-box" /> Box
+                  </span>
+                </>
+              )}
             </div>
             <>
               <div className="tracking-object-toolbar">

@@ -844,6 +844,16 @@ h2 {
   border: 1px solid #bdc7d4;
 }
 
+.legend-line {
+  width: 11px;
+  height: 0;
+  border-top: 2px solid #22d3ee;
+}
+
+.outline-dot {
+  border-top-style: dashed;
+}
+
 .annotation-id-field {
   display: grid;
   grid-template-columns: 1fr auto;

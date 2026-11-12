@@ -119,8 +119,14 @@ subset.
 
 ## Polygon baseline
 
-The project compares SAM2 prompting against a manual outline baseline. The tool
-switcher adds two outline tools beside the SAM2 prompts:
+The project compares SAM2 prompting against a manual outline baseline. A switch in
+the canvas toolbar chooses the approach, so only the relevant tools are shown:
+
+- **SAM2 prompts** — **Add object point**, **Add background point**, **Draw a box**.
+- **Manual outline** — **Click vertices** or **Trace outline**.
+
+Switching approach clears any outline in progress, so rings drawn for one condition
+can never be scored as the other.
 
 - **Click vertices** places a polygon vertex per click; click near the first vertex
   to close that part.
