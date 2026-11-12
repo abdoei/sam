@@ -159,18 +159,17 @@ def segment_image(
 
     with prediction_lock:
         predictor = get_predictor()
-        import torch
-        
-        print("DEVICE USED: ", predictor.device)
 
-        with torch.inference_mode():
-            predictor.set_image(np.array(image, copy=True))
-            masks, scores, _ = predictor.predict(
-                point_coords=point_coords,
-                point_labels=point_labels,
-                box=box,
-                multimask_output=True,
-            )
+    import torch
+
+    with torch.inference_mode():
+        predictor.set_image(np.array(image, copy=True))
+        masks, scores, _ = predictor.predict(
+            point_coords=point_coords,
+            point_labels=point_labels,
+            box=box,
+            multimask_output=True,
+        )
 
     best_index = int(np.argmax(scores))
     mask = np.asarray(masks[best_index], dtype=np.uint8) * 255
