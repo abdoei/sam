@@ -83,7 +83,10 @@ uv run python -m scripts.inspect_coco data/coco_subset/annotations/subset.json
 
 The subset downloader selects 300 images from COCO 2017 val using seed 42 and
 1–8 non-crowd instances per image; it fetches only those JPEGs, not the full
-val2017 image archive. The selected IDs are recorded in
+val2017 image archive. Selected IDs that were later removed from the subset are
+listed in `EXCLUDED_IMAGE_IDS` in `backend/scripts/prepare_coco_subset.py`, and
+selection samples until it has the requested count from the remaining images, so
+rerunning the downloader cannot reintroduce them. The selected IDs are recorded in
 `docs/selected_image_ids.json`. All image, annotation, mask, and checkpoint
 artifacts are ignored by Git. Read the source image licenses before redistribution.
 

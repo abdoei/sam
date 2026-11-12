@@ -39,6 +39,18 @@ def test_select_image_ids_rejects_invalid_instance_range() -> None:
         select_image_ids([], [], 1, 42, 3, 2)
 
 
+def test_select_image_ids_honours_excluded_ids_and_still_fills_the_sample() -> None:
+    images = [{"id": image_id} for image_id in range(1, 7)]
+    annotations = [{"image_id": image_id, "iscrowd": 0} for image_id in range(1, 7)]
+
+    selected = select_image_ids(
+        images, annotations, 3, 42, 1, 1, excluded_ids=frozenset({1, 2})
+    )
+
+    assert len(selected) == 3, "the sample is still filled"
+    assert not {1, 2} & set(selected), "excluded images never come back"
+
+
 def test_subset_and_ground_truth_export_scripts_run_end_to_end(tmp_path, monkeypatch) -> None:
     source_images = tmp_path / "raw" / "val2017"
     source_images.mkdir(parents=True)

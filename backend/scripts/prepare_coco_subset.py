@@ -8,6 +8,13 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
 
+# COCO val2017 images removed from the subset. Selection oversamples until it has
+# `sample_size` images that are not excluded, so the subset stays the requested
+# size instead of silently shrinking. Keep this list in step with
+# docs/selected_image_ids.json and data/coco_subset/.
+EXCLUDED_IMAGE_IDS = frozenset({44877, 61960, 110784, 261535, 281754, 301867, 327601,
+                               377239, 463618})
+
 
 def select_image_ids(
     images: list[dict[str, Any]],
@@ -16,6 +23,7 @@ def select_image_ids(
     seed: int,
     min_instances: int,
     max_instances: int,
+    excluded_ids: frozenset[int] = EXCLUDED_IMAGE_IDS,
 ) -> list[int]:
     if sample_size < 1:
         raise ValueError("sample_size must be greater than zero")
@@ -32,10 +40,12 @@ def select_image_ids(
         int(image["id"])
         for image in images
         if min_instances <= non_crowd_counts[int(image["id"])] <= max_instances
+        and int(image["id"]) not in excluded_ids
     )
     if len(candidates) < sample_size:
         raise ValueError(
-            f"Only {len(candidates)} images meet the filtering rules; "
+            f"Only {len(candidates)} images meet the filtering rules after "
+            f"excluding {len(excluded_ids & set(candidates))} excluded IDs; "
             f"cannot select {sample_size}"
         )
 

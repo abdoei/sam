@@ -47,6 +47,16 @@ The exported non-crowd ground-truth masks are written under `data/gt_masks/`.
 Check each source image's license metadata before redistribution. Do not upload
 COCO source images or derived masks to a public demo or commit them to Git.
 
+### Excluded images
+
+Nine originally selected images were removed from the subset, leaving 291 images
+and 934 annotations: `44877`, `61960`, `110784`, `261535`, `281754`, `301867`,
+`327601`, `377239`, `463618`. Their JPEGs, subset annotations, and ground-truth
+masks are deleted, and they are listed in `EXCLUDED_IMAGE_IDS` in
+`backend/scripts/prepare_coco_subset.py` so re-running the downloader skips them
+and still fills the requested count from the remaining images. Do not add these IDs
+back without also restoring their masks.
+
 ## SAM2.1 Hiera-Tiny checkpoint
 
 The downloaded checkpoint is the official Meta SAM 2.1 Hiera-Tiny model. It
