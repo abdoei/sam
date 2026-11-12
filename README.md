@@ -113,6 +113,35 @@ data, and annotation time in ignored `data/evaluation/` files. Uploaded images
 can be segmented and timed, but COCO metrics are only available for the bundled
 subset.
 
+## Polygon baseline
+
+The project compares SAM2 prompting against a manual outline baseline. The tool
+switcher adds two outline tools beside the SAM2 prompts:
+
+- **Click vertices** places a polygon vertex per click; click near the first vertex
+  (or press the button) to close and score it.
+- **Trace outline** records an outline while dragging, simplified server-side to
+  keep the stored shape faithful without storing every sample.
+
+Both score against the selected object's COCO ground truth with the same IoU and
+Dice comparison as SAM2, and use the same per-object timer (first press to
+acceptance), so the two conditions are measured identically. The outline is
+rasterised on the backend so neither condition can benefit from a different mask
+conversion. Selecting a different object row clears any outline in progress,
+because a zoom changes which image pixels a trace covered.
+
+Results are kept apart: SAM2 writes to `data/evaluation/` and the polygon
+condition to `data/evaluation_polygon/`, each with its own `predictions.csv`, so
+the two can never be mixed. After annotating with both, compare them with:
+
+```sh
+uv run python -m scripts.compare_methods
+```
+
+It writes `data/comparison.json` with each condition's mean IoU/Dice and
+annotation time, plus a paired comparison restricted to the annotations both
+conditions covered, reporting the seconds saved and the percentage reduction.
+
 Video mode accepts local MP4 files up to 100 MiB, including videos longer than
 15 seconds. For long videos, choose a 15-second segment with the segment-start
 slider and click **Apply tracking segment**. The browser samples up to 30 frames at 2

@@ -658,6 +658,21 @@ h1 {
   cursor: crosshair;
 }
 
+.cursor-polygon {
+  cursor: copy;
+}
+
+.cursor-freehand {
+  cursor: crosshair;
+}
+
+.outline-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
 .upload-prompt {
   display: flex;
   width: min(390px, calc(100% - 32px));

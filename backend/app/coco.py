@@ -32,10 +32,27 @@ def ground_truth_dir() -> Path:
     ).expanduser()
 
 
-def evaluation_dir() -> Path:
-    return Path(
+# The two annotation conditions measured by the project. Each writes to its own
+# directory so their predictions and manifests can never be confused.
+EVALUATION_METHODS = {"sam2": "evaluation", "polygon": "evaluation_polygon"}
+
+
+def evaluation_dir(method: str = "sam2") -> Path:
+    """Directory for one method's predictions, records and manifest.
+
+    COCO_EVALUATION_DIR sets the SAM2 root; the polygon condition is placed beside
+    it with a `_polygon` suffix unless COCO_POLYGON_EVALUATION_DIR overrides it.
+    """
+    if method not in EVALUATION_METHODS:
+        raise ValueError(f"Unknown evaluation method: {method!r}")
+    if method == "polygon":
+        override = os.getenv("COCO_POLYGON_EVALUATION_DIR")
+        if override:
+            return Path(override).expanduser()
+    root = Path(
         os.getenv("COCO_EVALUATION_DIR", str(ROOT / "data/evaluation"))
     ).expanduser()
+    return root if method == "sam2" else root.with_name(f"{root.name}_polygon")
 
 
 def load_subset() -> dict[str, Any]:
@@ -199,8 +216,23 @@ def save_and_evaluate_annotation(
     annotation_id: int,
     elapsed_seconds: float,
     mask_png: bytes,
-    prompt: PromptPayload,
+    prompt: PromptPayload | dict[str, Any] | None,
+    method: str = "sam2",
 ) -> dict[str, Any]:
+    """Score a mask against its ground truth and record it.
+
+    `method` selects the evaluation directory, so the SAM2 condition and the
+    polygon baseline are written to separate manifests and can never overwrite or
+    be averaged with one another. `prompt` is the SAM2 prompt that produced the
+    mask; the polygon condition has no prompt, so it passes the outline instead.
+    """
+    if method not in EVALUATION_METHODS:
+        raise ValueError(
+            f"Unknown evaluation method {method!r}; expected one of "
+            f"{', '.join(sorted(EVALUATION_METHODS))}"
+        )
+    method_dir = evaluation_dir(method)
+
     target_annotation, target_image = find_annotation(annotation_id)
     if int(target_annotation["image_id"]) != image_id:
         raise ValueError(
@@ -239,17 +271,18 @@ def save_and_evaluate_annotation(
         )
 
     metrics = binary_mask_metrics(prediction, ground_truth)
-    prediction_path = evaluation_dir() / "predictions" / f"{annotation_id}.png"
-    record_path = evaluation_dir() / "records" / f"{annotation_id}.json"
-    manifest_path = evaluation_dir() / "predictions.csv"
+    prediction_path = method_dir / "predictions" / f"{annotation_id}.png"
+    record_path = method_dir / "records" / f"{annotation_id}.json"
+    manifest_path = method_dir / "predictions.csv"
     record = {
         "image_id": image_id,
         "ann_id": annotation_id,
         "category_id": int(target_annotation["category_id"]),
+        "method": method,
         "elapsed_seconds": elapsed_seconds,
         **metrics,
-        "prediction_path": prediction_path.relative_to(evaluation_dir()).as_posix(),
-        "prompts": prompt.model_dump(),
+        "prediction_path": prediction_path.relative_to(method_dir).as_posix(),
+        "prompts": prompt.model_dump() if isinstance(prompt, PromptPayload) else prompt,
     }
 
     with _save_lock:

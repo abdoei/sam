@@ -2,7 +2,7 @@ import base64
 import binascii
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
@@ -17,6 +17,13 @@ from app.coco import (
     image_records,
     save_and_evaluate_annotation,
 )
+from app.polygon import (
+    MAX_POLYGON_POINTS,
+    polygon_mask_png,
+    polygon_summary,
+    simplify_polyline,
+    validate_polygon,
+)
 from app.prompts import PromptPayload
 from app.segmentation import MAX_IMAGE_BYTES, model_status, segment_image
 from app.video import (
@@ -28,6 +35,8 @@ from app.video import (
 
 MAX_PREDICTION_BYTES = 15 * 1024 * 1024
 MAX_VIDEO_UPLOAD_BYTES = MAX_VIDEO_FRAMES * MAX_VIDEO_FRAME_BYTES
+# Freehand traces are stored with this RDP tolerance, in image pixels.
+POLYGON_SIMPLIFY_TOLERANCE = 1.5
 
 app = FastAPI(title="SAM2 Interactive Annotation API", version="0.1.0")
 
@@ -40,6 +49,18 @@ class SaveAnnotationPayload(BaseModel):
     elapsed_seconds: float = Field(ge=0)
     mask_png_base64: str = Field(min_length=1, max_length=20 * 1024 * 1024)
     prompt: PromptPayload
+
+
+class SavePolygonPayload(BaseModel):
+    """A polygon or freehand outline submitted as the manual baseline."""
+
+    model_config = ConfigDict(allow_inf_nan=False)
+
+    image_id: int = Field(gt=0)
+    annotation_id: int = Field(gt=0)
+    elapsed_seconds: float = Field(ge=0)
+    points: list[list[float]] = Field(min_length=3, max_length=MAX_POLYGON_POINTS)
+    mode: Literal["polygon", "freehand"] = "polygon"
 
 
 @app.get("/api/health")
@@ -187,3 +208,68 @@ async def save_annotation(payload: SaveAnnotationPayload) -> dict[str, Any]:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/annotations/polygon")
+async def save_polygon_annotation(payload: SavePolygonPayload) -> dict[str, Any]:
+    """Score a polygon or freehand outline against the same ground truth as SAM2.
+
+    The outline is rasterised server-side so both conditions are measured from
+    exactly the same mask comparison, and the result is written to the polygon
+    evaluation directory.
+    """
+    try:
+        image = find_image(payload.image_id)
+        find_annotation(payload.annotation_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    width, height = int(image["width"]), int(image["height"])
+    try:
+        points = validate_polygon(payload.points, width, height)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    # Freehand traces are stored simplified; a hand-placed polygon is kept as drawn.
+    stored = (
+        simplify_polyline(points, POLYGON_SIMPLIFY_TOLERANCE)
+        if payload.mode == "freehand"
+        else points
+    )
+    # Simplification can flatten a thin or straight trace below a usable polygon.
+    # Fall back to the drawn outline rather than discarding the annotator's work.
+    if len(stored) < 3:
+        stored = points
+    try:
+        mask_png = polygon_mask_png(stored, width, height)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    # The polygon condition has no SAM2 prompt: the outline is the annotation, so
+    # the record stores it instead of inventing a point or box.
+    prompt = {"mode": payload.mode, "points": [[x, y] for x, y in stored]}
+    try:
+        result = await run_in_threadpool(
+            save_and_evaluate_annotation,
+            payload.image_id,
+            payload.annotation_id,
+            payload.elapsed_seconds,
+            mask_png,
+            prompt,
+            "polygon",
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    return {
+        **result,
+        "mode": payload.mode,
+        "outline": polygon_summary(stored),
+        "drawn_points": len(points),
+    }

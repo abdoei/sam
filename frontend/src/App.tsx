@@ -10,7 +10,7 @@ import { compositeMaskPixels } from "./maskOverlay.mjs";
 import { zoomViewportFor } from "./targetZoom.mjs";
 import "./App.css";
 
-type Tool = "positive" | "negative" | "box";
+type Tool = "positive" | "negative" | "box" | "polygon" | "freehand";
 
 type PointPrompt = {
   x: number;
@@ -129,6 +129,13 @@ const REFERENCE_MASK_COLOR = "#22d3ee";
 /** How long the reference mask stays visible after its row is selected. */
 const REFERENCE_MASK_FLASH_MS = 2000;
 
+/** Click within this many image pixels of the first vertex to close a polygon. */
+const POLYGON_CLOSE_DISTANCE = 12;
+/** Minimum pointer travel, in image pixels, between freehand samples. */
+const FREEHAND_SAMPLE_DISTANCE = 2;
+/** Outline stroke keeps this width in on-screen pixels, like the prompt chrome. */
+const OUTLINE_SCREEN_WIDTH = 2;
+
 function objectsFromAnnotations(annotations: CocoAnnotation[]): TrackedObject[] {
   return annotations.map((annotation, index) => ({
     id: index + 1,
@@ -146,7 +153,12 @@ const toolLabels: Record<Tool, string> = {
   positive: "Add object point",
   negative: "Add background point",
   box: "Draw a box",
+  polygon: "Click vertices",
+  freehand: "Trace outline",
 };
+
+/** Tools that draw the manual outline condition instead of prompting SAM2. */
+const OUTLINE_TOOLS = new Set<Tool>(["polygon", "freehand"]);
 
 function errorMessage(detail: unknown): string {
   if (typeof detail === "string") return detail;
@@ -308,6 +320,12 @@ function App() {
     Record<number, Record<number, string>>
   >({});
   const [tool, setTool] = useState<Tool>("positive");
+  /** Outline being drawn, in image pixels; null when nothing is in progress. */
+  const [outline, setOutline] = useState<{ x: number; y: number }[] | null>(null);
+  const drawingOutline = useRef(false);
+  /** Result of the most recent polygon/freehand submission. */
+  const [outlineResult, setOutlineResult] = useState<SavedAnnotation | null>(null);
+  const [isSavingOutline, setIsSavingOutline] = useState(false);
   const [draftBox, setDraftBox] = useState<BoxPrompt | null>(null);
   const [mask, setMask] = useState<SegmentResponse | null>(null);
   const [health, setHealth] = useState<HealthResponse | null>(null);
@@ -594,6 +612,34 @@ function App() {
         });
         if (draftBox) drawBox(draftBox, "#fbbf24");
       }
+
+      // The outline under construction, drawn in image coordinates like prompts.
+      if (outline && outline.length) {
+        context.beginPath();
+        context.moveTo(outline[0].x, outline[0].y);
+        for (const point of outline.slice(1)) {
+          context.lineTo(point.x, point.y);
+        }
+        if (tool === "freehand" || outline.length >= 3) {
+          context.closePath();
+          context.fillStyle = "rgba(34, 211, 238, 0.22)";
+          context.fill();
+        }
+        context.strokeStyle = "#22d3ee";
+        context.lineWidth = OUTLINE_SCREEN_WIDTH * pixelScale;
+        context.stroke();
+
+        // Vertex handles only while placing a polygon, and small enough not to
+        // hide the edge being drawn.
+        if (tool === "polygon") {
+          outline.forEach((point, index) => {
+            context.beginPath();
+            context.arc(point.x, point.y, POINT_SCREEN_RADIUS * pixelScale, 0, Math.PI * 2);
+            context.fillStyle = index === 0 ? "#fbbf24" : "#22d3ee";
+            context.fill();
+          });
+        }
+      }
     };
 
     const masks =
@@ -702,6 +748,8 @@ function App() {
     viewport,
     referenceMaskBase64,
     showReferenceMask,
+    outline,
+    tool,
   ]);
 
   function imageCoordinates(event: { clientX: number; clientY: number }) {
@@ -899,6 +947,10 @@ function App() {
   }
 
   function handleCanvasPointerDown(event: PointerEvent<HTMLCanvasElement>) {
+    if (OUTLINE_TOOLS.has(tool)) {
+      handleOutlinePointerDown(event);
+      return;
+    }
     if (tool === "box") {
       handleBoxStart(event);
       return;
@@ -969,6 +1021,118 @@ function App() {
       y1: coordinate.y,
     });
     event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  // Outline conditions: the annotator draws the boundary themselves. Polygon adds a
+  // vertex per click; freehand samples the pointer while dragging. Both feed the
+  // same submission, and the timer runs from the first press just as it does for
+  // SAM2, so the two conditions are measured identically.
+  function handleOutlinePointerDown(event: PointerEvent<HTMLCanvasElement>) {
+    if (event.button !== 0 || mediaMode !== "image") return;
+    const coordinate = imageCoordinates(event);
+    if (!coordinate) return;
+    if (tool === "freehand") {
+      startAnnotation();
+      drawingOutline.current = true;
+      setOutline([coordinate]);
+      event.currentTarget.setPointerCapture(event.pointerId);
+      return;
+    }
+    // Polygon: each click appends a vertex; clicking near the first closes it.
+    startAnnotation();
+    setOutlineResult(null);
+    setError(null);
+    setOutline((current) => {
+      const points = current ?? [];
+      if (points.length >= 3) {
+        const first = points[0];
+        if (Math.hypot(first.x - coordinate.x, first.y - coordinate.y) <= POLYGON_CLOSE_DISTANCE) {
+          return points;
+        }
+      }
+      return [...points, coordinate];
+    });
+  }
+
+  function handleOutlinePointerMove(event: PointerEvent<HTMLCanvasElement>) {
+    if (tool !== "freehand" || !drawingOutline.current) return;
+    const coordinate = imageCoordinates(event);
+    if (!coordinate) return;
+    setOutline((current) => {
+      if (!current?.length) return current;
+      const last = current[current.length - 1];
+      // Sample sparsely: a dense trace is slow to draw and is simplified server-side
+      // anyway, so sub-pixel steps add nothing but CPU.
+      if (Math.hypot(last.x - coordinate.x, last.y - coordinate.y) < FREEHAND_SAMPLE_DISTANCE) {
+        return current;
+      }
+      return [...current, coordinate];
+    });
+  }
+
+  function handleOutlinePointerUp() {
+    if (tool !== "freehand" || !drawingOutline.current) return;
+    drawingOutline.current = false;
+  }
+
+  function closePolygon() {
+    if (!outline || outline.length < 3) {
+      setError("A polygon needs at least three vertices.");
+      return;
+    }
+    void submitOutline();
+  }
+
+  function clearOutline() {
+    setOutline(null);
+    setOutlineResult(null);
+    setError(null);
+    annotationStart.current = null;
+    setAnnotationSeconds(null);
+  }
+
+  async function submitOutline() {
+    if (!outline || outline.length < 3) return;
+    if (selectedCocoImageId === null || activeTarget?.annId === undefined) {
+      setError("Select a COCO object row before scoring an outline.");
+      return;
+    }
+    if (annotationStart.current === null) return;
+    const elapsedSeconds = (monotonicNow() - annotationStart.current) / 1000;
+    setIsSavingOutline(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/annotations/polygon", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          image_id: selectedCocoImageId,
+          annotation_id: activeTarget.annId,
+          elapsed_seconds: elapsedSeconds,
+          points: outline.map((point) => [point.x, point.y]),
+          mode: tool === "freehand" ? "freehand" : "polygon",
+        }),
+      });
+      const body = (await response.json()) as SavedAnnotation | { detail?: unknown };
+      if (!response.ok) {
+        throw new Error(errorMessage("detail" in body ? body.detail : null));
+      }
+      if (!("iou" in body) || !("dice" in body)) {
+        throw new Error("The backend response did not contain evaluation metrics.");
+      }
+      setOutlineResult(body);
+      setAnnotationSeconds(elapsedSeconds);
+      setTrackedObjects((current) =>
+        current.map((object) =>
+          object.id === activeTrackedObjectId ? { ...object, iou: body.iou } : object,
+        ),
+      );
+      annotationStart.current = null;
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setIsSavingOutline(false);
+    }
   }
 
   function handleBoxMove(event: PointerEvent<HTMLCanvasElement>) {
@@ -1566,11 +1730,15 @@ function App() {
               </button>
             )}
             <div className="tool-group" role="group" aria-label="Prompt tool">
-              {(["positive", "negative", "box"] as const).map((nextTool) => (
+              {(["positive", "negative", "box", "polygon", "freehand"] as const).map((nextTool) => (
                 <button
                   className={`tool-button ${tool === nextTool ? "selected" : ""}`}
                   key={nextTool}
-                  onClick={() => setTool(nextTool)}
+                  onClick={() => {
+                    setTool(nextTool);
+                    setOutline(null);
+                    setOutlineResult(null);
+                  }}
                   type="button"
                   aria-pressed={tool === nextTool}
                 >
@@ -1579,7 +1747,11 @@ function App() {
                       ? "+"
                       : nextTool === "negative"
                         ? "−"
-                        : "□"}
+                        : nextTool === "box"
+                          ? "□"
+                          : nextTool === "polygon"
+                            ? "⬡"
+                            : "✎"}
                   </span>
                   {toolLabels[nextTool]}
                 </button>
@@ -1688,8 +1860,14 @@ function App() {
                   aria-label="Click to add prompts or drag to draw a box"
                   className={`prompt-canvas cursor-${tool}`}
                   onPointerDown={handleCanvasPointerDown}
-                  onPointerMove={handleBoxMove}
-                  onPointerUp={handleBoxEnd}
+                  onPointerMove={(event) => {
+                    handleOutlinePointerMove(event);
+                    handleBoxMove(event);
+                  }}
+                  onPointerUp={(event) => {
+                    handleOutlinePointerUp();
+                    handleBoxEnd(event);
+                  }}
                   ref={canvasRef}
                 />
               </div>
@@ -1739,8 +1917,14 @@ function App() {
                   aria-label="Click to add video tracking prompts"
                   className={`prompt-canvas cursor-${tool}`}
                   onPointerDown={handleCanvasPointerDown}
-                  onPointerMove={handleBoxMove}
-                  onPointerUp={handleBoxEnd}
+                  onPointerMove={(event) => {
+                    handleOutlinePointerMove(event);
+                    handleBoxMove(event);
+                  }}
+                  onPointerUp={(event) => {
+                    handleOutlinePointerUp();
+                    handleBoxEnd(event);
+                  }}
                   ref={canvasRef}
                 />
               </div>
@@ -1980,6 +2164,11 @@ function App() {
                           setActiveTrackedObjectId(object.id);
                           focusTarget(object);
                           flashReferenceMask(object);
+                          // A drawn outline belongs to one framing: after a zoom the
+                          // pixels it covered are no longer what the annotator
+                          // traced, so scoring it would measure the wrong shape.
+                          setOutline(null);
+                          setOutlineResult(null);
                           if (mediaMode === "image") {
                             setMask(imageMasks[object.id] ?? null);
                           }
@@ -2119,6 +2308,48 @@ function App() {
                     : "Check the configured SAM2 model and checkpoint."}
               </p>
             )}
+            {OUTLINE_TOOLS.has(tool) ? (
+              // Outline conditions submit the drawn boundary instead of prompting
+              // SAM2, so they replace the primary action while such a tool is active.
+              <div className="outline-actions">
+                <p className="helper-text">
+                  {tool === "polygon"
+                    ? `Click to place vertices (${outline?.length ?? 0} placed), then close the shape.`
+                    : "Drag to trace the object's outline, then close the shape."}
+                </p>
+                <button
+                  className="primary-button"
+                  disabled={
+                    isSavingOutline ||
+                    (outline?.length ?? 0) < 3 ||
+                    activeTarget?.annId === undefined
+                  }
+                  onClick={() => void closePolygon()}
+                  type="button"
+                >
+                  {isSavingOutline
+                    ? "Saving outline…"
+                    : tool === "freehand"
+                      ? "Score traced outline"
+                      : "Close polygon and score"}
+                </button>
+                <button
+                  className="secondary-button"
+                  onClick={clearOutline}
+                  type="button"
+                >
+                  Clear outline
+                </button>
+                {outlineResult && (
+                  <p className="evaluation-metrics">
+                    Polygon condition · IoU{" "}
+                    <strong>{outlineResult.iou.toFixed(3)}</strong> · Dice{" "}
+                    <strong>{outlineResult.dice.toFixed(3)}</strong>
+                    <span>Saved to the polygon evaluation manifest.</span>
+                  </p>
+                )}
+              </div>
+            ) : (
             <button
               className="primary-button"
               disabled={
@@ -2149,6 +2380,7 @@ function App() {
                   : "Generate mask"
               )}
             </button>
+            )}
             {error && (
               <p className="error-message" role="alert">
                 {error}

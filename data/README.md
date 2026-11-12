@@ -57,6 +57,16 @@ masks are deleted, and they are listed in `EXCLUDED_IMAGE_IDS` in
 and still fills the requested count from the remaining images. Do not add these IDs
 back without also restoring their masks.
 
+## Evaluation output
+
+Each annotation condition writes to its own directory so results are never mixed:
+
+- `data/evaluation/` — SAM2 prompted masks
+- `data/evaluation_polygon/` — manual polygon and freehand outlines
+
+Each holds `predictions.csv`, `predictions/<ann_id>.png` and `records/<ann_id>.json`.
+Run `uv run python -m scripts.compare_methods` from `backend/` to compare them.
+
 ## SAM2.1 Hiera-Tiny checkpoint
 
 The downloaded checkpoint is the official Meta SAM 2.1 Hiera-Tiny model. It

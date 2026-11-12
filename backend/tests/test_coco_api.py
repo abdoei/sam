@@ -230,3 +230,96 @@ def test_save_annotation_rejects_annotation_for_another_image(tmp_path, monkeypa
     response = client.post("/api/annotations", json=payload)
 
     assert response.status_code == 422
+
+
+def test_save_polygon_scores_against_ground_truth_and_writes_its_own_directory(
+    tmp_path, monkeypatch
+) -> None:
+    create_coco_fixture(tmp_path, monkeypatch)
+    # The fixture's annotation 12 covers the 2x2 block at (1,1)-(2,2).
+    payload = {
+        "image_id": 7,
+        "annotation_id": 12,
+        "elapsed_seconds": 9.5,
+        "points": [[1, 1], [3, 1], [3, 3], [1, 3]],
+        "mode": "polygon",
+    }
+
+    response = client.post("/api/annotations/polygon", json=payload)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["method"] == "polygon"
+    assert body["mode"] == "polygon"
+    assert body["drawn_points"] == 4
+    assert body["outline"]["vertex_count"] == 4
+    assert body["elapsed_seconds"] == 9.5
+    assert 0 < body["iou"] <= 1
+
+    # The polygon result lands beside the SAM2 directory, never inside it.
+    polygon_dir = tmp_path / "evaluation_polygon"
+    assert (polygon_dir / "predictions/12.png").is_file()
+    assert (polygon_dir / "records/12.json").is_file()
+    with (polygon_dir / "predictions.csv").open(newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    assert [row["ann_id"] for row in rows] == ["12"]
+    assert not (tmp_path / "evaluation").exists(), "SAM2 results must stay untouched"
+
+
+def test_save_polygon_simplifies_freehand_traces(tmp_path, monkeypatch) -> None:
+    create_coco_fixture(tmp_path, monkeypatch)
+    # A closed freehand trace around the same square, densely sampled on each edge.
+    trace = []
+    for step in range(20):
+        trace.append([1 + 0.1 * step, 1.0])
+        trace.append([3.0, 1 + 0.1 * step])
+        trace.append([3 - 0.1 * step, 3.0])
+        trace.append([1.0, 3 - 0.1 * step])
+    payload = {
+        "image_id": 7,
+        "annotation_id": 12,
+        "elapsed_seconds": 4.0,
+        "points": trace,
+        "mode": "freehand",
+    }
+
+    body = client.post("/api/annotations/polygon", json=payload).json()
+
+    assert body["mode"] == "freehand"
+    assert body["drawn_points"] == len(trace)
+    assert body["outline"]["vertex_count"] < len(trace) / 4, "stored trace is simplified"
+    # The fixture's ground truth is 4x4 px, so a one-pixel boundary difference
+    # already costs a large share of IoU; the point is that the outline still
+    # overlaps the target at all rather than being empty or inverted.
+    assert body["iou"] > 0.3, "the simplified outline still covers the target"
+
+
+def test_save_polygon_rejects_points_outside_the_image(tmp_path, monkeypatch) -> None:
+    create_coco_fixture(tmp_path, monkeypatch)
+    payload = {
+        "image_id": 7,
+        "annotation_id": 12,
+        "elapsed_seconds": 1,
+        "points": [[0, 0], [40, 0], [40, 40]],
+        "mode": "polygon",
+    }
+
+    response = client.post("/api/annotations/polygon", json=payload)
+
+    assert response.status_code == 422
+    assert "outside" in response.json()["detail"]
+
+
+def test_save_polygon_rejects_annotation_for_another_image(tmp_path, monkeypatch) -> None:
+    create_coco_fixture(tmp_path, monkeypatch)
+    payload = {
+        "image_id": 8,
+        "annotation_id": 12,
+        "elapsed_seconds": 1,
+        "points": [[0, 0], [3, 0], [3, 3]],
+        "mode": "polygon",
+    }
+
+    response = client.post("/api/annotations/polygon", json=payload)
+
+    assert response.status_code == 422
